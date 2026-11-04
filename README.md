@@ -40,6 +40,20 @@ In the desktop app, where `/plugin` does not run: click **+** next to the prompt
 
 Mods are an early-access part of Claude Code and may change between releases.
 
+## Update
+
+From a shell:
+
+```bash
+claude plugin marketplace update claude-mod-usage-pill
+```
+
+```bash
+claude plugin update usage-pill@claude-mod-usage-pill
+```
+
+Then restart Claude Code: the update applies after a restart.
+
 ## Subagents
 
 While subagents run, a sidebar lists each one with its model, effort, what it is doing and its progress, drawn by a Claude mascot in its own outfit. It opens when the first agent starts. To open it yourself, press the mascot in the bar's `Working` section, or run `/subagents`. The mascot in the bar walks while any subagent is running.
