@@ -1,3 +1,5 @@
+import { MASCOT_STYLE, mascotMarkup } from './mascot'
+import type { Outfit } from '../types'
 import type { TaskView } from './task'
 
 export type PillModel = {
@@ -9,6 +11,8 @@ export type PillModel = {
   /** Warm while the prompt cache should still hold it; the ring is the time left. */
   cache?: { isWarm: boolean; percentLeft: number }
   isWorking: boolean
+  /** Who stands in the task chip: it walks while subagents run. */
+  mascot?: { outfit?: Outfit; running: number }
 }
 
 /**
@@ -33,6 +37,10 @@ const SIZE = 11.5
 /** The space kept around each section, inside the one border. */
 const INSET = 4
 const CHIP_PAD = 12
+/** The mascot in the task chip, and what it takes from the chip's text. */
+// Twice the grid: anything but a whole multiple smears its pixels.
+const MASCOT_SIZE = 32
+const MASCOT_ROOM = MASCOT_SIZE + 6
 const MIN_BAR = 56
 const MAX_BAR = 120
 /** The hairline between two sections. */
@@ -131,6 +139,7 @@ const gaugeChip = (g: Gauge) => gaugeWidth(g) + CHIP_PAD * 2
 
 const taskChip = (task: TaskView, bar: number) =>
   CHIP_PAD * 2 +
+  MASCOT_ROOM +
   widthOf(task.label) +
   10 +
   bar +
@@ -171,14 +180,21 @@ const draw = (m: PillModel, width: number, fit: Fit) => {
     const { label, steps, count } = m.task
     const barY = mid - 3
     const w = taskChip(m.task, bar) + spare
-    const left = x + CHIP_PAD + spare / 2
+    // Its own place, not centred, so the button over it finds it at any width. Two
+    // pixels above the middle of the row, as the highlight of the button is.
+    const mascotAt = x + CHIP_PAD - 2
+    const left = x + CHIP_PAD + MASCOT_ROOM
     const start = left + widthOf(label) + 10
 
     defs +=
       `<linearGradient id="fill" gradientUnits="userSpaceOnUse" x1="${start.toFixed(1)}" x2="${(start + bar).toFixed(1)}" y1="0" y2="0"><stop offset="0" stop-color="#FF7A59"/><stop offset="1" stop-color="#B46BFF"/></linearGradient>` +
       `<clipPath id="bar"><rect x="${start.toFixed(1)}" y="${barY}" width="${bar.toFixed(1)}" height="6" rx="3"/></clipPath>`
 
-    body += text(left, label, 'label')
+    const mood = m.mascot && m.mascot.running > 0 ? 'moving' : 'still'
+
+    body +=
+      `<g transform="translate(${mascotAt.toFixed(1)} ${mid - MASCOT_SIZE / 2 - 2}) scale(${MASCOT_SIZE / 16})" shape-rendering="crispEdges">${mascotMarkup(mood, m.mascot?.outfit)}</g>` +
+      text(left, label, 'label')
 
     if (steps) {
       // One segment per step: done ones lit, the current one pulsing.
@@ -261,6 +277,7 @@ const draw = (m: PillModel, width: number, fit: Fit) => {
     `.label{fill:#E8E8EC}.value{fill:#F7F7F8;font-weight:600}.dim{fill:#9A9AA3;font-weight:450}` +
     `.sweep{animation:sweep 1.8s cubic-bezier(.45,0,.55,1) infinite}` +
     `.pulse{animation:pulse 1.6s ease-in-out infinite}` +
+    MASCOT_STYLE +
     `@keyframes sweep{to{transform:translateX(var(--travel))}}` +
     `@keyframes pulse{50%{opacity:.4}}` +
     `@media (prefers-reduced-motion:reduce){.sweep,.pulse{animation:none}}`
@@ -286,6 +303,7 @@ const draw = (m: PillModel, width: number, fit: Fit) => {
 
   const parts = [
     m.task && `Task: ${[m.task.label, m.task.count].filter(Boolean).join(', ')}`,
+    m.mascot && m.mascot.running > 0 && `${m.mascot.running} subagents running`,
     m.session &&
       `session ${Math.round(m.session.percent)}% used${m.session.left ? `, ${m.session.left}` : ''}`,
     m.week !== undefined && `week ${Math.round(m.week)}% used`,
