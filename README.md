@@ -42,7 +42,7 @@ Mods are an early-access part of Claude Code and may change between releases.
 
 ## Known limits
 
-- **Tuned by eye for one setup.** The app doesn't let a mod style its rectangle above the prompt, so the bar is drawn over it, using pixel measurements taken from screenshots of the macOS desktop app. It may sit a pixel or two off at other window widths, or further off on other platforms and app versions. To adjust it, change `ABOVE`, `ROW` and `LEFT` in `hooks/pill.ts`, and `CELL_WIDTH` in `hooks/register.tsx`.
+- **Tuned by eye for one setup.** The app doesn't let a mod style its rectangle above the prompt, so the bar is drawn over it, using pixel measurements taken from screenshots of the macOS and Windows desktop apps. It may sit a pixel or two off at other window widths, or further off on Linux and other app versions. To adjust it, change `MACOS` or `WINDOWS` in `hooks/pill.ts`, and `CELL_WIDTH` in `hooks/register.tsx`.
 - **Warm and cold are an estimate.** Claude Code doesn't report the cache's state, so the mod counts one hour from the last request. If your requests use the five-minute lifetime, for example on extra usage, it can say `Warm` after the cache has gone cold.
 - **The task bar depends on the desktop app.** It reads the desktop app's task-list tool, so other surfaces show the sweeping bar instead.
 - **Terminal.** The terminal gets a plain text version of the same figures. It has not been checked by eye.

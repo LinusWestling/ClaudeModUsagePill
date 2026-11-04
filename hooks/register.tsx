@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Color, EngineInterface, ModelUsage, Register } from 'claude-code'
 
 import type { Cache, Reading, Task } from '../types'
-import { buildPill } from './pill'
+import { MACOS, WINDOWS, buildPill } from './pill'
 import type { PillModel } from './pill'
 import { NO_TASK, PLAN_TOOL, WRAP_UP_TOOL, applyPlan, finishPlan, viewTask } from './task'
 
@@ -246,7 +246,8 @@ export const register: Register = on => {
       // padding, which is one cell on each side: the border lands on the rectangle.
       // The body flips between neighbouring widths while the row doesn't: use the even one.
       const columns = Math.ceil(e.props.bodyColumns / 2) * 2
-      const pill = buildPill(model, (columns + 2) * CELL_WIDTH)
+      const fit = (await $.env.get('OS')) === 'Windows_NT' ? WINDOWS : MACOS
+      const pill = buildPill(model, (columns + 2) * CELL_WIDTH, fit)
 
       return (
         <Box height={1}>

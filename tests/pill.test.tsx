@@ -12,6 +12,7 @@ const NO_TASK = { steps: [], tools: 0 }
 
 const seed = (on: any, values: Record<string, unknown>) => {
   on('clock.now', () => ({ value: NOW }))
+  on('env.get', () => ({ value: values.OS }))
   on('state.get', (_: unknown, e: { key: string }) => ({
     value: {
       value: { cache: null, minute: 0, task: NO_TASK, isWorking: false, ...values }[e.key] ?? null,
@@ -178,5 +179,25 @@ test('no reading yet leaves the band to the engine', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect((await ui.find({ type: 'Text', text: /engine/ }))?.text).toBe('engine')
+  await ui.unmount()
+})
+
+test('on Windows the border lands on the row, which starts lower in the drawing', async ($, on) => {
+  seed(on, { reading: READING, cache: CACHE, OS: 'Windows_NT' })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
+  expect(source.includes('<rect x="0.5" y="17.5"')).toBe(true)
+  expect(source.includes(' height="57" ')).toBe(true)
+  await ui.unmount()
+})
+
+test('elsewhere it keeps the macOS measurements', async ($, on) => {
+  seed(on, { reading: READING, cache: CACHE })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
+  expect(source.includes('<rect x="2" y="10.5"')).toBe(true)
+  expect(source.includes(' height="50" ')).toBe(true)
   await ui.unmount()
 })
