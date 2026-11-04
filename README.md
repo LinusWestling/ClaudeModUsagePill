@@ -63,3 +63,7 @@ claude plugin test .
 ```
 
 The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar and `task.ts` follows the task list.
+
+## License
+
+[MIT](LICENSE)
