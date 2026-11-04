@@ -1,0 +1,5 @@
+{
+  "name": "claude-mod-usage-pill",
+  "owner": { "name": "Linus Westling" },
+  "plugins": [{ "name": "usage-pill", "source": "./" }]
+}
