@@ -1,3 +1,5 @@
+import { MASCOT_STYLE, mascotMarkup } from './mascot'
+import type { Outfit } from '../types'
 import type { TaskView } from './task'
 
 export type PillModel = {
@@ -9,21 +11,36 @@ export type PillModel = {
   /** Warm while the prompt cache should still hold it; the ring is the time left. */
   cache?: { isWarm: boolean; percentLeft: number }
   isWorking: boolean
+  /** Who stands in the task chip: it walks while subagents run. */
+  mascot?: { outfit?: Outfit; running: number }
 }
 
-// Measured from a screenshot: the app's row is 40px tall with this body, and one
-// cell up, where the drawing is placed, starts 10px above the row and is clipped.
-const ABOVE = 10
+/**
+ * Where the app's row lies relative to the drawing, in pixels: measured from
+ * screenshots, as a mod can't ask. The drawing is placed one cell up and one left.
+ */
+export type Fit = {
+  /** How far the row's top is below the drawing's; what's above it is clipped. */
+  above: number
+  /** How far the row's left edge is inside the drawing. */
+  left: number
+  /** How far the row's right edge is inside the drawing. */
+  right: number
+}
+
+export const MACOS: Fit = { above: 10, left: 1.5, right: 1 }
+export const WINDOWS: Fit = { above: 17, left: 0, right: 0 }
+
 const ROW = 40
-const HEIGHT = ABOVE + ROW
-// Likewise one cell left starts 1.5px outside the row.
-const LEFT = 1.5
 const CORNER = 12
-const MID = ABOVE + ROW / 2
 const SIZE = 11.5
 /** The space kept around each section, inside the one border. */
 const INSET = 4
 const CHIP_PAD = 12
+/** The mascot in the task chip, and what it takes from the chip's text. */
+// Twice the grid: anything but a whole multiple smears its pixels.
+const MASCOT_SIZE = 32
+const MASCOT_ROOM = MASCOT_SIZE + 6
 const MIN_BAR = 56
 const MAX_BAR = 120
 /** The hairline between two sections. */
@@ -66,9 +83,6 @@ const widthOf = (text: string, isStrong = false): number => {
 
 const escapeXml = (text: string) =>
   text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
-
-const text = (x: number, content: string, cls: string): string =>
-  `<text x="${x.toFixed(1)}" y="${MID}" dy="0.35em" class="${cls}">${escapeXml(content)}</text>`
 
 type Gauge = {
   percent: number
@@ -125,6 +139,7 @@ const gaugeChip = (g: Gauge) => gaugeWidth(g) + CHIP_PAD * 2
 
 const taskChip = (task: TaskView, bar: number) =>
   CHIP_PAD * 2 +
+  MASCOT_ROOM +
   widthOf(task.label) +
   10 +
   bar +
@@ -140,9 +155,13 @@ const neededWidth = (m: PillModel) => {
   return INSET * 2 + task + chips + Math.max(0, gaps) * GAP
 }
 
-const draw = (m: PillModel, width: number) => {
+const draw = (m: PillModel, width: number, fit: Fit) => {
+  const { above, left: rowLeft, right: rowRight } = fit
+  const mid = above + ROW / 2
+  const text = (x: number, content: string, cls: string): string =>
+    `<text x="${x.toFixed(1)}" y="${mid}" dy="0.35em" class="${cls}">${escapeXml(content)}</text>`
   const gauges = gaugesOf(m)
-  const free = Math.max(0, width - LEFT - neededWidth(m))
+  const free = Math.max(0, width - rowLeft - neededWidth(m))
 
   // The bar grows only so far when it has steps to show; the rest is shared by all
   // the chips, so the row is filled edge to edge without the task taking it over.
@@ -152,23 +171,30 @@ const draw = (m: PillModel, width: number) => {
 
   let body = ''
   let defs = ''
-  let x = LEFT + INSET
+  let x = rowLeft + INSET
 
   const divider = (at: number) =>
-    `<rect x="${at.toFixed(1)}" y="${MID - 9}" width="1" height="18" class="divider"/>`
+    `<rect x="${at.toFixed(1)}" y="${mid - 9}" width="1" height="18" class="divider"/>`
 
   if (m.task) {
     const { label, steps, count } = m.task
-    const barY = MID - 3
+    const barY = mid - 3
     const w = taskChip(m.task, bar) + spare
-    const left = x + CHIP_PAD + spare / 2
+    // Its own place, not centred, so the button over it finds it at any width. Two
+    // pixels above the middle of the row, as the highlight of the button is.
+    const mascotAt = x + CHIP_PAD - 2
+    const left = x + CHIP_PAD + MASCOT_ROOM
     const start = left + widthOf(label) + 10
 
     defs +=
       `<linearGradient id="fill" gradientUnits="userSpaceOnUse" x1="${start.toFixed(1)}" x2="${(start + bar).toFixed(1)}" y1="0" y2="0"><stop offset="0" stop-color="#FF7A59"/><stop offset="1" stop-color="#B46BFF"/></linearGradient>` +
       `<clipPath id="bar"><rect x="${start.toFixed(1)}" y="${barY}" width="${bar.toFixed(1)}" height="6" rx="3"/></clipPath>`
 
-    body += text(left, label, 'label')
+    const mood = m.mascot && m.mascot.running > 0 ? 'moving' : 'still'
+
+    body +=
+      `<g transform="translate(${mascotAt.toFixed(1)} ${mid - MASCOT_SIZE / 2 - 2}) scale(${MASCOT_SIZE / 16})" shape-rendering="crispEdges">${mascotMarkup(mood, m.mascot?.outfit)}</g>` +
+      text(left, label, 'label')
 
     if (steps) {
       // One segment per step: done ones lit, the current one pulsing.
@@ -222,12 +248,12 @@ const draw = (m: PillModel, width: number) => {
     const cx = at + 7
 
     defs += `<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${g.colors[0]}"/><stop offset="1" stop-color="${g.colors[1]}"/></linearGradient>`
-    body += `<circle cx="${cx.toFixed(1)}" cy="${MID}" r="${r}" fill="none" class="ring" stroke-width="2.2"/>`
+    body += `<circle cx="${cx.toFixed(1)}" cy="${mid}" r="${r}" fill="none" class="ring" stroke-width="2.2"/>`
 
     if (dash > 0) {
       body +=
-        `<circle cx="${cx.toFixed(1)}" cy="${MID}" r="${r}" fill="none" stroke="url(#${id})" stroke-width="2.2" stroke-linecap="round" ` +
-        `stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}" transform="rotate(-90 ${cx.toFixed(1)} ${MID})"/>`
+        `<circle cx="${cx.toFixed(1)}" cy="${mid}" r="${r}" fill="none" stroke="url(#${id})" stroke-width="2.2" stroke-linecap="round" ` +
+        `stroke-dasharray="${dash.toFixed(2)} ${circumference.toFixed(2)}" transform="rotate(-90 ${cx.toFixed(1)} ${mid})"/>`
     }
 
     at += 20
@@ -251,6 +277,7 @@ const draw = (m: PillModel, width: number) => {
     `.label{fill:#E8E8EC}.value{fill:#F7F7F8;font-weight:600}.dim{fill:#9A9AA3;font-weight:450}` +
     `.sweep{animation:sweep 1.8s cubic-bezier(.45,0,.55,1) infinite}` +
     `.pulse{animation:pulse 1.6s ease-in-out infinite}` +
+    MASCOT_STYLE +
     `@keyframes sweep{to{transform:translateX(var(--travel))}}` +
     `@keyframes pulse{50%{opacity:.4}}` +
     `@media (prefers-reduced-motion:reduce){.sweep,.pulse{animation:none}}`
@@ -265,16 +292,18 @@ const draw = (m: PillModel, width: number) => {
     .map((c, i) => `<stop offset="${i / (edge.length - 1)}" stop-color="${c}"/>`)
     .join('')
 
-  defs += `<linearGradient id="edge" gradientUnits="userSpaceOnUse" x1="${LEFT}" x2="${size}" y1="0" y2="0">${edgeStops}</linearGradient>`
+  defs += `<linearGradient id="edge" gradientUnits="userSpaceOnUse" x1="${rowLeft}" x2="${size}" y1="0" y2="0">${edgeStops}</linearGradient>`
   body =
-    `<rect x="${LEFT + 0.5}" y="${ABOVE + 0.5}" width="${size - LEFT - 2}" height="${ROW - 1}" rx="${CORNER}" fill="url(#edge)" fill-opacity=".05" stroke="url(#edge)" stroke-opacity=".8"/>` +
+    `<rect x="${rowLeft + 0.5}" y="${above + 0.5}" width="${size - rowLeft - rowRight - 1}" height="${ROW - 1}" rx="${CORNER}" fill="url(#edge)" fill-opacity=".05" stroke="url(#edge)" stroke-opacity=".8"/>` +
     body
+  const height = above + ROW
   const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${HEIGHT}" viewBox="0 0 ${size} ${HEIGHT}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${height}" viewBox="0 0 ${size} ${height}">` +
     `<style>${style}</style><defs>${defs}</defs>${body}</svg>`
 
   const parts = [
     m.task && `Task: ${[m.task.label, m.task.count].filter(Boolean).join(', ')}`,
+    m.mascot && m.mascot.running > 0 && `${m.mascot.running} subagents running`,
     m.session &&
       `session ${Math.round(m.session.percent)}% used${m.session.left ? `, ${m.session.left}` : ''}`,
     m.week !== undefined && `week ${Math.round(m.week)}% used`,
@@ -282,18 +311,18 @@ const draw = (m: PillModel, width: number) => {
     m.cache && `prompt cache ${m.cache.isWarm ? 'warm' : 'cold'}`,
   ].filter(Boolean)
 
-  return { source, width: size, height: HEIGHT, alt: parts.join(', ') }
+  return { source, width: size, height, alt: parts.join(', ') }
 }
 
 /** Fills `width`, giving up the least important figures first when it is narrow. */
-export const buildPill = (m: PillModel, width: number) => {
+export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS) => {
   const attempts: PillModel[] = [
     m,
     { ...m, week: undefined },
     { ...m, week: undefined, cache: undefined },
     { ...m, week: undefined, cache: undefined, context: undefined },
   ]
-  const fitting = attempts.find(attempt => neededWidth(attempt) <= width - LEFT)
+  const fitting = attempts.find(attempt => neededWidth(attempt) <= width - fit.left)
 
-  return draw(fitting ?? attempts[attempts.length - 1]!, width)
+  return draw(fitting ?? attempts[attempts.length - 1]!, width, fit)
 }
