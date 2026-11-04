@@ -26,10 +26,12 @@ export type Fit = {
   left: number
   /** How far the row's right edge is inside the drawing. */
   right: number
+  /** Moves the mascot to the centre of the button's hover highlight, which differs. */
+  mascot: { x: number; y: number }
 }
 
-export const MACOS: Fit = { above: 10, left: 1.5, right: 1 }
-export const WINDOWS: Fit = { above: 17, left: 0, right: 0 }
+export const MACOS: Fit = { above: 10, left: 1.5, right: 1, mascot: { x: -4, y: 0 } }
+export const WINDOWS: Fit = { above: 17, left: 0, right: 0, mascot: { x: 0, y: -2 } }
 
 const ROW = 40
 const CORNER = 12
@@ -180,9 +182,8 @@ const draw = (m: PillModel, width: number, fit: Fit) => {
     const { label, steps, count } = m.task
     const barY = mid - 3
     const w = taskChip(m.task, bar) + spare
-    // Its own place, not centred, so the button over it finds it at any width. Two
-    // pixels above the middle of the row, as the highlight of the button is.
-    const mascotAt = x + CHIP_PAD - 2
+    // Its own place, not centred, so the button over it finds it at any width.
+    const mascotAt = x + CHIP_PAD - 2 + fit.mascot.x
     const left = x + CHIP_PAD + MASCOT_ROOM
     const start = left + widthOf(label) + 10
 
@@ -193,7 +194,7 @@ const draw = (m: PillModel, width: number, fit: Fit) => {
     const mood = m.mascot && m.mascot.running > 0 ? 'moving' : 'still'
 
     body +=
-      `<g transform="translate(${mascotAt.toFixed(1)} ${mid - MASCOT_SIZE / 2 - 2}) scale(${MASCOT_SIZE / 16})" shape-rendering="crispEdges">${mascotMarkup(mood, m.mascot?.outfit)}</g>` +
+      `<g transform="translate(${mascotAt.toFixed(1)} ${mid - MASCOT_SIZE / 2 + fit.mascot.y}) scale(${MASCOT_SIZE / 16})" shape-rendering="crispEdges">${mascotMarkup(mood, m.mascot?.outfit)}</g>` +
       text(left, label, 'label')
 
     if (steps) {

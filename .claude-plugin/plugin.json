@@ -1,6 +1,6 @@
 {
   "name": "usage-pill",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "A usage bar above the prompt: task progress, session and weekly limits, context tokens, warm or cold prompt cache",
   "types": "./types/index.d.ts",
   "author": {
