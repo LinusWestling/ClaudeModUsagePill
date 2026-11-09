@@ -128,3 +128,68 @@ export const progressLine = (run: AgentRun, now: number): string => {
 
   return parts.filter(Boolean).join(' · ')
 }
+
+// Types every agent call can name without saying anything about the work.
+const PLAIN_TYPES = new Set(['', 'general-purpose', 'claude'])
+
+/** Model, then effort and type only where they say something: the defaults are noise. */
+export const metaLine = (run: AgentRun): string =>
+  [
+    shortModel(run.model),
+    run.effort === undefined || run.effort === 'medium' ? undefined : effortLabel(run.effort),
+    PLAIN_TYPES.has(run.type) ? undefined : run.type,
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+/** The opening sentence of a report, its markdown dropped: what the agent found, in a line. */
+export const firstSentence = (text: string, room = 140): string => {
+  const lines = text.split('\n').filter(l => l.trim().length > 0 && !/^[-=|:\s]+$/.test(l))
+  // A heading names the report; its first line of prose says what was found.
+  const line = lines.find(l => !/^\s*#/.test(l)) ?? lines[0] ?? ''
+  const plain = line
+    .replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/, '')
+    .replace(/[*_`]+/g, '')
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .trim()
+  const sentence = /^.+?[.!?](?=\s|$)/.exec(plain)?.[0] ?? plain
+
+  return cut(sentence, room)
+}
+
+/** How a finished run ended, with how long it took: `✓ 43s`, `Stopped · 12s`. */
+export const endLabel = (run: AgentRun, now: number): string => {
+  const took = elapsed((run.endedAt ?? now) - run.startedAt)
+
+  return run.status === 'done'
+    ? `✓ ${took}`
+    : run.status === 'stopped'
+      ? `Stopped · ${took}`
+      : run.status === 'failed'
+        ? `Failed · ${took}`
+        : took
+}
+
+/** The heading: counts, then the span from the first start to the last end, and tokens. */
+export const summaryLine = (runs: AgentRun[], now: number): { counts: string; totals: string } => {
+  if (runs.length === 0) return { counts: 'No subagents yet', totals: '' }
+
+  const running = runs.filter(isRunning).length
+  const finished = runs.length - running
+  const counts =
+    running === 0
+      ? `All ${finished} finished`
+      : finished === 0
+        ? `${running} running`
+        : `${running} running · ${finished} finished`
+  const start = Math.min(...runs.map(r => r.startedAt))
+  const end = running > 0 ? now : Math.max(...runs.map(r => r.endedAt ?? now))
+  const tokens = runs.reduce((sum, r) => sum + (r.tokens ?? 0), 0)
+
+  return {
+    counts,
+    totals: [elapsed(end - start), tokens > 0 ? `${compact(tokens)} tokens` : undefined]
+      .filter(Boolean)
+      .join(' · '),
+  }
+}

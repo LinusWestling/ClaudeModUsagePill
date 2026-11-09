@@ -48,6 +48,8 @@ export type AgentRun = {
   startedAt: number
   endedAt?: number
   outfit: Outfit
+  /** The report it handed back, cut to its opening sentence. */
+  answer?: string
 }
 
 declare module 'claude-code' {

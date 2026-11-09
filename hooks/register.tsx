@@ -7,11 +7,13 @@ import {
   PANE_TITLE,
   compact,
   describeTool,
-  effortLabel,
+  endLabel,
+  firstSentence,
   isRunning,
+  metaLine,
   progressLine,
-  shortModel,
   statusOf,
+  summaryLine,
   upsertRun,
 } from './agents'
 import { mascotSvg } from './mascot'
@@ -274,7 +276,18 @@ export const register: Register = on => {
       const now = await $.clock.now()
 
       await update($, agents, runs =>
-        upsertRun(runs, id, { status: statusOf(e.reason), activity: undefined, endedAt: now }, now),
+        upsertRun(
+          runs,
+          id,
+          {
+            status: statusOf(e.reason),
+            activity: undefined,
+            endedAt: now,
+            // Kept to its opening sentence: the whole report is in the transcript.
+            ...(e.answer ? { answer: firstSentence(e.answer) } : {}),
+          },
+          now,
+        ),
       )
     }
 
@@ -460,72 +473,129 @@ export const register: Register = on => {
     await read($, agentTick)
     const now = await $.clock.now()
     const running = runs.filter(isRunning)
-    // Those still working first; among the rest, the latest to finish.
-    const order = [
-      ...running,
-      ...runs.filter(r => !isRunning(r)).sort((x, y) => (y.endedAt ?? 0) - (x.endedAt ?? 0)),
-    ]
-    const heading =
-      running.length > 0
-        ? `${running.length} running, ${runs.length - running.length} finished`
-        : runs.length > 0
-          ? `All ${runs.length} finished`
-          : 'No subagents yet'
+    // The latest to finish first.
+    const finished = runs.filter(r => !isRunning(r)).sort((x, y) => (y.endedAt ?? 0) - (x.endedAt ?? 0))
+    const summary = summaryLine(runs, now)
+    const viewing = e.props.view?.agentId
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const hasPictures = e.surface !== 'terminal'
 
-    const details = (run: AgentRun) => {
-      const { Box, Text } = $.ui.resolve(e)
+    const mascot = (run: AgentRun, size: number) => {
+      if (!hasPictures) return null
+
+      const { Svg } = $.ui.resolve(e as typeof e & { surface: 'desktop' })
+
+      return (
+        <Box flexShrink={0}>
+          <Svg
+            source={mascotSvg(MOOD[run.status], run.outfit, size)}
+            alt={`${STATUS_WORD[run.status]} mascot in a ${run.outfit} outfit`}
+            width={size}
+            height={size}
+          />
+        </Box>
+      )
+    }
+
+    const transcriptButton = (run: AgentRun) =>
+      viewing === run.id ? (
+        <Button key={`back-${run.id}`} plain dimColor label="Back to main" onPress={() => void $.ui.view({})} />
+      ) : (
+        <Button
+          key={`open-${run.id}`}
+          plain
+          dimColor
+          label="Open transcript →"
+          onPress={() => void $.ui.view({ agentId: run.id })}
+        />
+      )
+
+    // Running: the big mascot, what it is doing now and its steps, in a card of its own.
+    const live = (run: AgentRun) => {
       const stepBar = run.steps.map(s => (s.status === 'completed' ? '▰' : '▱')).join('')
 
       return (
+        <Box
+          key={`run-${run.id}`}
+          flexDirection="row"
+          columnGap={1}
+          borderStyle="round"
+          borderColor={viewing === run.id ? 'suggestion' : 'claude'}
+          paddingX={1}
+        >
+          {mascot(run, 48)}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Text bold wrap="truncate-end">
+              {run.description || run.type || 'Subagent'}
+            </Text>
+            <Text dimColor wrap="truncate-end">
+              {metaLine(run)}
+            </Text>
+            <Text color="claude" wrap="truncate-end">
+              {run.activity ?? 'Starting'}
+            </Text>
+            {stepBar ? <Text color="claude">{stepBar}</Text> : null}
+            <Text dimColor wrap="truncate-end">
+              {progressLine(run, now)}
+            </Text>
+            {transcriptButton(run)}
+          </Box>
+        </Box>
+      )
+    }
+
+    // Finished: a small mascot, how it ended, and what it reported.
+    const done = (run: AgentRun) => (
+      <Box key={`done-${run.id}`} flexDirection="row" columnGap={1}>
+        {mascot(run, 24)}
         <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-          <Text bold wrap="truncate-end">
-            {run.description || run.type || 'Subagent'}
-          </Text>
-          <Text dimColor wrap="truncate-end">
-            {shortModel(run.model)} · {effortLabel(run.effort)}
-            {run.type ? ` · ${run.type}` : ''}
-          </Text>
-          <Text wrap="truncate-end">
-            <Text color={STATUS_COLOR[run.status]}>{STATUS_WORD[run.status]}</Text>
-            {run.activity ? `: ${run.activity}` : ''}
-          </Text>
-          {stepBar ? <Text color="claude">{stepBar}</Text> : null}
-          <Text dimColor wrap="truncate-end">
-            {progressLine(run, now)}
-          </Text>
+          <Box flexDirection="row" columnGap={1} justifyContent="space-between">
+            <Box flexShrink={1}>
+              <Text bold wrap="truncate-end">
+                {run.description || run.type || 'Subagent'}
+              </Text>
+            </Box>
+            <Box flexShrink={0}>
+              <Text color={STATUS_COLOR[run.status]}>{endLabel(run, now)}</Text>
+            </Box>
+          </Box>
+          {run.answer ? (
+            <Text wrap="wrap">{run.answer}</Text>
+          ) : (
+            <Text dimColor wrap="truncate-end">
+              {metaLine(run)} · {progressLine(run, now)}
+            </Text>
+          )}
+          {run.answer ? (
+            <Text dimColor wrap="truncate-end">
+              {metaLine(run)} · {progressLine(run, now)}
+            </Text>
+          ) : null}
+          {transcriptButton(run)}
         </Box>
-      )
-    }
-
-    if (e.surface === 'terminal') {
-      const { Box, Text } = $.ui.resolve(e)
-
-      return (
-        <Box flexDirection="column" rowGap={1}>
-          <Text dimColor>{heading}</Text>
-          {order.map(run => details(run))}
-        </Box>
-      )
-    }
-
-    const { Box, Svg, Text } = $.ui.resolve(e)
+      </Box>
+    )
 
     return (
       <Box flexDirection="column" rowGap={1}>
-        <Text dimColor>{heading}</Text>
-        {order.map(run => (
-          <Box flexDirection="row" columnGap={1}>
-            <Box flexShrink={0}>
-              <Svg
-                source={mascotSvg(MOOD[run.status], run.outfit, 48)}
-                alt={`${STATUS_WORD[run.status]} mascot in a ${run.outfit} outfit`}
-                width={48}
-                height={48}
-              />
-            </Box>
-            {details(run)}
+        <Box flexDirection="row" columnGap={1} justifyContent="space-between">
+          <Text bold>{summary.counts}</Text>
+          {summary.totals ? <Text dimColor>{summary.totals}</Text> : null}
+        </Box>
+        {running.map(live)}
+        {finished.length > 0 ? (
+          <Box flexDirection="row" columnGap={1} justifyContent="space-between">
+            <Text dimColor>Finished</Text>
+            <Button
+              key="clear"
+              plain
+              dimColor
+              label="Clear"
+              onPress={() => void update($, agents, list => list.filter(isRunning))}
+            />
           </Box>
-        ))}
+        ) : null}
+        {finished.map(done)}
       </Box>
     )
   })
