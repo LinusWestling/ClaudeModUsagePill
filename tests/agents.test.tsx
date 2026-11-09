@@ -1,6 +1,15 @@
 import { expect, test } from 'claude-code/testing'
 
-import { describeTool, progressLine, shortModel, upsertRun } from '../hooks/agents'
+import {
+  describeTool,
+  endLabel,
+  firstSentence,
+  metaLine,
+  progressLine,
+  shortModel,
+  summaryLine,
+  upsertRun,
+} from '../hooks/agents'
 import { OUTFITS, mascotMarkup, mascotSvg, pickOutfit } from '../hooks/mascot'
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
@@ -30,6 +39,7 @@ const standIn = (on: any, opened: string[] = []) => {
   on('agent.spawn', () => ({ model: 'claude-haiku-5-5', agentId: 'a1' }))
   on('turn.start', (_: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('tool.call', () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
 }
 
 const SPAWN = {
@@ -129,4 +139,71 @@ test('names and figures read plainly', () => {
 
   const run = upsertRun([], 'a', { tools: 2, tokens: 18_400 }, NOW)[0]!
   expect(progressLine(run, NOW + 80_000)).toBe('2 tools · 1m 20s · 18k tokens')
+})
+
+test('a finished agent shows what it reported, opens its transcript, and clears', async ($, on) => {
+  const viewed: unknown[] = []
+  standIn(on)
+  on('ui.view', (_: unknown, e: unknown) => {
+    viewed.push(e)
+
+    return { value: {} }
+  })
+
+  await $.agent.spawn(SPAWN as any)
+  await $.turn.complete({
+    agentId: 'a1',
+    turnId: 't1',
+    reason: 'answer',
+    answer: '## Done\n\nAdded **noindex** to 37 pages. Then I checked the sitemap.',
+    durationMs: 1000,
+    isAborted: false,
+  } as any)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect((await ui.find({ type: 'Text', text: /All 1 finished/ }))?.text).toBe('All 1 finished')
+  expect((await ui.find({ type: 'Text', text: /noindex/ }))?.text).toBe('Added noindex to 37 pages.')
+  expect((await ui.find({ type: 'Text', text: /^✓/ }))?.text).toBe('✓ 0s')
+  expect(((await ui.find({ type: 'Svg' })) as any).props.width).toBe(24)
+
+  await ui.press({ key: 'open-a1' })
+  expect(viewed).toEqual([{ agentId: 'a1' }])
+
+  await ui.press({ key: 'clear' })
+  expect((await ui.find({ type: 'Text', text: /No subagents yet/ }))?.text).toBe('No subagents yet')
+  await ui.unmount()
+})
+
+test('the pane offers the way back while an agent is in view', async ($, on) => {
+  standIn(on)
+  await $.agent.spawn(SPAWN as any)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop', props: { ...PANE.props, view: { agentId: 'a1' } } })
+
+  expect((await ui.find({ key: 'back-a1' })) !== undefined).toBe(true)
+  await ui.unmount()
+})
+
+test('the default type and effort are left out, a report reads as one sentence', () => {
+  const plain = upsertRun([], 'a', { type: 'general-purpose', model: 'claude-sonnet-5-5', effort: 'medium' }, NOW)[0]!
+  expect(metaLine(plain)).toBe('Sonnet 5.5')
+
+  const odd = upsertRun([], 'a', { type: 'Explore', model: 'claude-haiku-5-5', effort: 'high' }, NOW)[0]!
+  expect(metaLine(odd)).toBe('Haiku 5.5 · high effort · Explore')
+
+  expect(firstSentence('# Summary\n\n- Fixed the [404](x.html) redirect. Also more.')).toBe(
+    'Fixed the 404 redirect.',
+  )
+  expect(firstSentence('')).toBe('')
+
+  const done = { ...plain, status: 'done' as const, endedAt: NOW + 43_000 }
+  expect(endLabel(done, NOW + 99_000)).toBe('✓ 43s')
+  expect(endLabel({ ...done, status: 'failed' }, NOW)).toBe('Failed · 43s')
+
+  const running = upsertRun([], 'b', { tokens: 20_000 }, NOW + 10_000)[0]!
+  expect(summaryLine([{ ...done, tokens: 66_000 }, running], NOW + 60_000)).toEqual({
+    counts: '1 running · 1 finished',
+    totals: '1m 0s · 86k tokens',
+  })
 })
