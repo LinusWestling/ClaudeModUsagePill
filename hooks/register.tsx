@@ -5,6 +5,7 @@ import type { AgentRun, Cache, Reading, Task } from '../types'
 import {
   PANE,
   PANE_TITLE,
+  TRANSCRIPT_PANE,
   compact,
   describeTool,
   endLabel,
@@ -14,6 +15,7 @@ import {
   progressLine,
   statusOf,
   summaryLine,
+  transcriptRows,
   upsertRun,
 } from './agents'
 import { mascotSvg } from './mascot'
@@ -30,6 +32,7 @@ const working = atom({ plugin: 'usage-pill', key: 'isWorking' } as const, false)
 // stored, which outlives a reload.
 const agents = atom({ plugin: 'usage-pill', key: 'agents' } as const, [], { shape: 'agents-1' })
 const agentTick = atom({ plugin: 'usage-pill', key: 'agentTick' } as const, 0)
+const transcriptOf = atom({ plugin: 'usage-pill', key: 'transcriptOf' } as const, null)
 
 
 // A cell of the desktop's band, in pixels, measured from a screenshot. A little
@@ -139,6 +142,20 @@ const toModel = (
 }
 
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: PANE_TITLE })
+
+/**
+ * Puts the agent's transcript in the main view, as the terminal's tasks list does.
+ * Where the session refuses that (the desktop and other apps draw no tasks list),
+ * the transcript opens in a pane of the mod's own instead.
+ */
+const openTranscript = async ($: EngineInterface, run: AgentRun) => {
+  const shown = await $.ui.view({ agentId: run.id })
+
+  if (!shown.deny) return
+
+  await update($, transcriptOf, () => run.id)
+  await $.ui.open({ id: TRANSCRIPT_PANE, title: `Transcript · ${run.description || run.type || 'Subagent'}` })
+}
 
 /**
  * Blank, as the button lies over the mascot the pill draws beneath it. Its width sets
@@ -506,7 +523,7 @@ export const register: Register = on => {
           plain
           dimColor
           label="Open transcript →"
-          onPress={() => void $.ui.view({ agentId: run.id })}
+          onPress={() => void openTranscript($, run)}
         />
       )
 
@@ -596,6 +613,65 @@ export const register: Register = on => {
           </Box>
         ) : null}
         {finished.map(done)}
+      </Box>
+    )
+  })
+
+  // A subagent's transcript, where the main view can't switch to it.
+  on('ui.render', { component: 'Pane', requestId: TRANSCRIPT_PANE }, async ($, e) => {
+    const id = await read($, transcriptOf)
+    const runs = await read($, agents)
+    // Redraws every few seconds while the agent runs, so new steps show.
+    await read($, agentTick)
+    const { Box, Button, Text } = $.ui.resolve(e)
+    const run = runs.find(r => r.id === id)
+    const close = (
+      <Button key="close-transcript" plain dimColor label="Close" onPress={() => void $.ui.close({ id: TRANSCRIPT_PANE })} />
+    )
+
+    if (!id) {
+      return (
+        <Box flexDirection="column" rowGap={1}>
+          <Text dimColor>No transcript picked. Open one from the Subagents panel.</Text>
+          {close}
+        </Box>
+      )
+    }
+
+    const found = await $.session.messages({ agentId: id })
+    const rows = Array.isArray(found) ? transcriptRows(found) : []
+
+    return (
+      <Box flexDirection="column" rowGap={1}>
+        <Box flexDirection="row" columnGap={1} justifyContent="space-between">
+          <Box flexShrink={1}>
+            <Text bold wrap="truncate-end">
+              {run?.description || run?.type || 'Subagent'}
+            </Text>
+          </Box>
+          <Box flexShrink={0}>
+            <Text color={STATUS_COLOR[run?.status ?? 'done']}>{STATUS_WORD[run?.status ?? 'done']}</Text>
+          </Box>
+        </Box>
+        {Array.isArray(found) ? null : <Text color="warning">{found.deny}</Text>}
+        {Array.isArray(found) && rows.length === 0 ? <Text dimColor>Nothing in its transcript yet.</Text> : null}
+        {rows.map(row =>
+          row.kind === 'prompt' ? (
+            <Box key={row.key} flexDirection="column">
+              <Text dimColor>Prompt</Text>
+              <Text wrap="wrap">{row.text}</Text>
+            </Box>
+          ) : row.kind === 'text' ? (
+            <Text key={row.key} wrap="wrap">
+              {row.text}
+            </Text>
+          ) : (
+            <Text key={row.key} color={row.kind === 'error' ? 'error' : undefined} dimColor={row.kind === 'tool'} wrap="truncate-end">
+              {`→ ${row.text}`}
+            </Text>
+          ),
+        )}
+        {close}
       </Box>
     )
   })

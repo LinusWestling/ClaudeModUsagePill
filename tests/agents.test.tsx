@@ -8,6 +8,7 @@ import {
   progressLine,
   shortModel,
   summaryLine,
+  transcriptRows,
   upsertRun,
 } from '../hooks/agents'
 import { OUTFITS, mascotMarkup, mascotSvg, pickOutfit } from '../hooks/mascot'
@@ -206,4 +207,53 @@ test('the default type and effort are left out, a report reads as one sentence',
     counts: '1 running · 1 finished',
     totals: '1m 0s · 86k tokens',
   })
+})
+
+test('where the main view cannot switch, the transcript opens in a pane of its own', async ($, on) => {
+  const opened: string[] = []
+  standIn(on, opened)
+  on('ui.view', () => ({ value: { deny: 'the session draws no main view' } }))
+  on('session.messages', () => ({
+    value: [
+      { role: 'user', text: 'Review the email copy', toolUses: [] },
+      {
+        role: 'assistant',
+        text: 'Reading the template first.',
+        toolUses: [{ tool_use_id: 'u1', tool: 'Read', input: { file_path: '/repo/email/1.html' } }],
+      },
+      { role: 'user', text: '', toolUses: [], toolResults: [] },
+    ],
+  }))
+
+  await $.agent.spawn(SPAWN as any)
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    opened.length = 0
+    const pane = await $.ui.mount({ ...PANE, surface })
+    await pane.press({ key: 'open-a1' })
+    expect(opened).toEqual(['usage-pill-transcript'])
+    await pane.unmount()
+
+    const transcript = await $.ui.mount({
+      ...PANE,
+      surface,
+      requestId: 'usage-pill-transcript',
+      props: { ...PANE.props, title: 'Transcript · Map the repo' },
+    })
+    expect((await transcript.find({ type: 'Text', text: /Review the email/ }))?.text).toBe('Review the email copy')
+    expect((await transcript.find({ type: 'Text', text: /Reading the template/ })) !== undefined).toBe(true)
+    expect((await transcript.find({ type: 'Text', text: /Reading 1.html/ }))?.text).toBe('→ Reading 1.html')
+    await transcript.unmount()
+  }
+})
+
+test('a transcript keeps its latest rows and leaves out empty tool results', () => {
+  const many = Array.from({ length: 100 }, (_, i) => ({
+    role: 'assistant' as const,
+    text: `step ${i}`,
+    toolUses: [],
+  }))
+  const rows = transcriptRows([{ role: 'user', text: '', toolUses: [] }, ...many], 10)
+  expect(rows.length).toBe(10)
+  expect(rows[9]!.text).toBe('step 99')
 })

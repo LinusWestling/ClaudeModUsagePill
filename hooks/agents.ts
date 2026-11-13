@@ -193,3 +193,49 @@ export const summaryLine = (runs: AgentRun[], now: number): { counts: string; to
       .join(' · '),
   }
 }
+
+/** The pane that shows a subagent's transcript where the main view can't switch to it. */
+export const TRANSCRIPT_PANE = 'usage-pill-transcript'
+
+export type TranscriptRow = { key: string; kind: 'prompt' | 'text' | 'tool' | 'error'; text: string }
+
+type TranscriptMessage = {
+  role: 'user' | 'assistant'
+  text: string
+  toolUses: { tool_use_id: string; tool: string; input: Record<string, unknown>; isError?: true }[]
+}
+
+const clip = (text: string, room: number): string =>
+  text.length > room ? `${text.slice(0, room - 1).trimEnd()}…` : text
+
+/**
+ * An agent's conversation as rows to read: the prompt it was given, what it said,
+ * and each tool it ran in a line. Only the latest `max` rows are kept, so a long run
+ * stays within what a pane draws.
+ */
+export const transcriptRows = (messages: TranscriptMessage[], max = 80): TranscriptRow[] => {
+  const rows: TranscriptRow[] = []
+
+  messages.forEach((m, i) => {
+    const text = m.text.trim()
+
+    if (m.role === 'user') {
+      // Tool results ride on user messages with no text of their own.
+      if (text) rows.push({ key: `m${i}`, kind: 'prompt', text: clip(text, 1_200) })
+
+      return
+    }
+
+    if (text) rows.push({ key: `m${i}`, kind: 'text', text: clip(text, 2_000) })
+
+    for (const use of m.toolUses) {
+      rows.push({
+        key: `t${use.tool_use_id}`,
+        kind: use.isError ? 'error' : 'tool',
+        text: describeTool(use.tool, use.input),
+      })
+    }
+  })
+
+  return rows.slice(-max)
+}
