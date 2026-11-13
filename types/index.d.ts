@@ -62,6 +62,8 @@ declare module 'claude-code' {
       isWorking: boolean
       agents: Shaped<AgentRun[]>
       agentTick: number
+      /** The agent whose transcript the mod's own pane shows, where the main view can't. */
+      transcriptOf: string | null
     }
   }
 }

@@ -56,7 +56,7 @@ Then restart Claude Code: the update applies after a restart.
 
 ## Subagents
 
-While subagents run, a sidebar lists each one, drawn by a Claude mascot in its own outfit. A running agent gets a card with its model, what it is doing and its progress. A finished one shrinks to a row with how it ended, how long it took and the first sentence of its report. **Open transcript** shows an agent's whole transcript in the main view, and **Clear** removes the finished ones. Effort and agent type only show when they differ from the defaults. It opens when the first agent starts. To open it yourself, press the mascot in the bar's `Working` section, or run `/subagents`. The mascot in the bar walks while any subagent is running.
+While subagents run, a sidebar lists each one, drawn by a Claude mascot in its own outfit. A running agent gets a card with its model, what it is doing and its progress. A finished one shrinks to a row with how it ended, how long it took and the first sentence of its report. **Open transcript** shows an agent's whole transcript in the main view. Where the app can't switch the main view (the desktop app), the transcript opens in a pane of its own instead, refreshing while the agent runs. **Clear** removes the finished ones. Effort and agent type only show when they differ from the defaults. It opens when the first agent starts. To open it yourself, press the mascot in the bar's `Working` section, or run `/subagents`. The mascot in the bar walks while any subagent is running.
 
 An agent doesn't report how far along it is, so progress is what can be counted: steps if it keeps a task list, then tools run, time and tokens. There is no made-up percentage.
 
