@@ -5,17 +5,18 @@ import type { AgentRun, Cache, Reading, Task } from '../types'
 import {
   PANE,
   PANE_TITLE,
-  TRANSCRIPT_PANE,
   compact,
   describeTool,
+  elapsed,
   endLabel,
   firstSentence,
   isRunning,
   metaLine,
+  nextActivity,
   progressLine,
   statusOf,
+  stepLine,
   summaryLine,
-  transcriptRows,
   upsertRun,
 } from './agents'
 import { mascotSvg } from './mascot'
@@ -32,7 +33,6 @@ const working = atom({ plugin: 'usage-pill', key: 'isWorking' } as const, false)
 // stored, which outlives a reload.
 const agents = atom({ plugin: 'usage-pill', key: 'agents' } as const, [], { shape: 'agents-1' })
 const agentTick = atom({ plugin: 'usage-pill', key: 'agentTick' } as const, 0)
-const transcriptOf = atom({ plugin: 'usage-pill', key: 'transcriptOf' } as const, null)
 
 
 // A cell of the desktop's band, in pixels, measured from a screenshot. A little
@@ -144,18 +144,19 @@ const toModel = (
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: PANE_TITLE })
 
 /**
- * Puts the agent's transcript in the main view, as the terminal's tasks list does.
- * Where the session refuses that (the desktop and other apps draw no tasks list),
- * the transcript opens in a pane of the mod's own instead.
+ * Puts the agent's transcript in the app's own transcript view, as its tasks list
+ * does. Where the app refuses, it says why rather than showing a copy of its own.
  */
 const openTranscript = async ($: EngineInterface, run: AgentRun) => {
   const shown = await $.ui.view({ agentId: run.id })
 
-  if (!shown.deny) return
-
-  await update($, transcriptOf, () => run.id)
-  await $.ui.open({ id: TRANSCRIPT_PANE, title: `Transcript · ${run.description || run.type || 'Subagent'}` })
+  if (shown.deny) {
+    $.ui.toast(`Can't open ${run.description || 'this agent'}'s transcript here: ${shown.deny}`)
+  }
 }
+
+/** An earlier version drew transcripts in a pane of its own; this closes one left open. */
+const OLD_TRANSCRIPT_PANE = 'usage-pill-transcript'
 
 /**
  * Blank, as the button lies over the mascot the pill draws beneath it. Its width sets
@@ -183,8 +184,9 @@ export const register: Register = on => {
   // Also runs on a reload, so the pill shows without waiting for a response.
   on('session.start', async ($, e, next) => {
     const result = await next(e)
-    // An earlier version of this mod opened a side panel; leave none behind.
+    // Earlier versions of this mod opened panes this one no longer draws.
     await $.ui.close({ id: 'usage-pill' })
+    await $.ui.close({ id: OLD_TRANSCRIPT_PANE })
     await $.command.register({
       name: 'subagents',
       description: 'Show the subagents of this session in a sidebar',
@@ -332,7 +334,7 @@ export const register: Register = on => {
           id,
           e.tool === PLAN_TOOL
             ? { steps: applyPlan(run?.steps ?? [], args) }
-            : { tools: (run?.tools ?? 0) + 1, activity: describeTool(e.tool, fields) },
+            : { tools: (run?.tools ?? 0) + 1, ...nextActivity(run, describeTool(e.tool, fields)) },
           now,
         )
       })
@@ -516,20 +518,20 @@ export const register: Register = on => {
 
     const transcriptButton = (run: AgentRun) =>
       viewing === run.id ? (
-        <Button key={`back-${run.id}`} plain dimColor label="Back to main" onPress={() => void $.ui.view({})} />
+        <Button key={`back-${run.id}`} plain label="← Back to main" onPress={() => void $.ui.view({})} />
       ) : (
-        <Button
-          key={`open-${run.id}`}
-          plain
-          dimColor
-          label="Open transcript →"
-          onPress={() => void openTranscript($, run)}
-        />
+        <Button key={`open-${run.id}`} plain dimColor label="View transcript" onPress={() => void openTranscript($, run)} />
       )
 
-    // Running: the big mascot, what it is doing now and its steps, in a card of its own.
+    const title = (run: AgentRun) => run.description || run.type || 'Subagent'
+
+    // Running: the big mascot, what it is doing now, what it did just before, and
+    // where it is in its own steps, in a card of its own.
     const live = (run: AgentRun) => {
-      const stepBar = run.steps.map(s => (s.status === 'completed' ? '▰' : '▱')).join('')
+      const stepBar = run.steps
+        .map(s => (s.status === 'completed' ? '▰' : s.status === 'in_progress' ? '▣' : '▱'))
+        .join('')
+      const step = stepLine(run)
 
       return (
         <Box
@@ -542,16 +544,35 @@ export const register: Register = on => {
         >
           {mascot(run, 48)}
           <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-            <Text bold wrap="truncate-end">
-              {run.description || run.type || 'Subagent'}
-            </Text>
+            <Box flexDirection="row" columnGap={1} justifyContent="space-between">
+              <Box flexShrink={1}>
+                <Text bold wrap="truncate-end">
+                  {title(run)}
+                </Text>
+              </Box>
+              <Box flexShrink={0}>
+                <Text color="claude">{elapsed(now - run.startedAt)}</Text>
+              </Box>
+            </Box>
             <Text dimColor wrap="truncate-end">
               {metaLine(run)}
             </Text>
             <Text color="claude" wrap="truncate-end">
-              {run.activity ?? 'Starting'}
+              {`● ${run.activity ?? 'Starting'}`}
             </Text>
-            {stepBar ? <Text color="claude">{stepBar}</Text> : null}
+            {(run.recent ?? []).map((was, i) => (
+              <Text key={`was-${run.id}-${i}`} dimColor wrap="truncate-end">
+                {`  ${was}`}
+              </Text>
+            ))}
+            {step ? (
+              <Box flexDirection="row" columnGap={1}>
+                {stepBar ? <Text color="claude">{stepBar}</Text> : null}
+                <Box flexShrink={1}>
+                  <Text wrap="truncate-end">{step}</Text>
+                </Box>
+              </Box>
+            ) : null}
             <Text dimColor wrap="truncate-end">
               {progressLine(run, now)}
             </Text>
@@ -561,7 +582,7 @@ export const register: Register = on => {
       )
     }
 
-    // Finished: a small mascot, how it ended, and what it reported.
+    // Finished: a small mascot, how it ended, what it reported, and what it took.
     const done = (run: AgentRun) => (
       <Box key={`done-${run.id}`} flexDirection="row" columnGap={1}>
         {mascot(run, 24)}
@@ -569,7 +590,7 @@ export const register: Register = on => {
           <Box flexDirection="row" columnGap={1} justifyContent="space-between">
             <Box flexShrink={1}>
               <Text bold wrap="truncate-end">
-                {run.description || run.type || 'Subagent'}
+                {title(run)}
               </Text>
             </Box>
             <Box flexShrink={0}>
@@ -578,16 +599,14 @@ export const register: Register = on => {
           </Box>
           {run.answer ? (
             <Text wrap="wrap">{run.answer}</Text>
-          ) : (
-            <Text dimColor wrap="truncate-end">
-              {metaLine(run)} · {progressLine(run, now)}
+          ) : run.status === 'done' ? null : (
+            <Text color={STATUS_COLOR[run.status]} wrap="truncate-end">
+              {run.status === 'stopped' ? 'Stopped before it reported back' : 'Ended before it reported back'}
             </Text>
           )}
-          {run.answer ? (
-            <Text dimColor wrap="truncate-end">
-              {metaLine(run)} · {progressLine(run, now)}
-            </Text>
-          ) : null}
+          <Text dimColor wrap="truncate-end">
+            {metaLine(run)} · {progressLine(run, now)}
+          </Text>
           {transcriptButton(run)}
         </Box>
       </Box>
@@ -602,7 +621,7 @@ export const register: Register = on => {
         {running.map(live)}
         {finished.length > 0 ? (
           <Box flexDirection="row" columnGap={1} justifyContent="space-between">
-            <Text dimColor>Finished</Text>
+            <Text dimColor>{`Finished · ${finished.length}`}</Text>
             <Button
               key="clear"
               plain
@@ -613,65 +632,6 @@ export const register: Register = on => {
           </Box>
         ) : null}
         {finished.map(done)}
-      </Box>
-    )
-  })
-
-  // A subagent's transcript, where the main view can't switch to it.
-  on('ui.render', { component: 'Pane', requestId: TRANSCRIPT_PANE }, async ($, e) => {
-    const id = await read($, transcriptOf)
-    const runs = await read($, agents)
-    // Redraws every few seconds while the agent runs, so new steps show.
-    await read($, agentTick)
-    const { Box, Button, Text } = $.ui.resolve(e)
-    const run = runs.find(r => r.id === id)
-    const close = (
-      <Button key="close-transcript" plain dimColor label="Close" onPress={() => void $.ui.close({ id: TRANSCRIPT_PANE })} />
-    )
-
-    if (!id) {
-      return (
-        <Box flexDirection="column" rowGap={1}>
-          <Text dimColor>No transcript picked. Open one from the Subagents panel.</Text>
-          {close}
-        </Box>
-      )
-    }
-
-    const found = await $.session.messages({ agentId: id })
-    const rows = Array.isArray(found) ? transcriptRows(found) : []
-
-    return (
-      <Box flexDirection="column" rowGap={1}>
-        <Box flexDirection="row" columnGap={1} justifyContent="space-between">
-          <Box flexShrink={1}>
-            <Text bold wrap="truncate-end">
-              {run?.description || run?.type || 'Subagent'}
-            </Text>
-          </Box>
-          <Box flexShrink={0}>
-            <Text color={STATUS_COLOR[run?.status ?? 'done']}>{STATUS_WORD[run?.status ?? 'done']}</Text>
-          </Box>
-        </Box>
-        {Array.isArray(found) ? null : <Text color="warning">{found.deny}</Text>}
-        {Array.isArray(found) && rows.length === 0 ? <Text dimColor>Nothing in its transcript yet.</Text> : null}
-        {rows.map(row =>
-          row.kind === 'prompt' ? (
-            <Box key={row.key} flexDirection="column">
-              <Text dimColor>Prompt</Text>
-              <Text wrap="wrap">{row.text}</Text>
-            </Box>
-          ) : row.kind === 'text' ? (
-            <Text key={row.key} wrap="wrap">
-              {row.text}
-            </Text>
-          ) : (
-            <Text key={row.key} color={row.kind === 'error' ? 'error' : undefined} dimColor={row.kind === 'tool'} wrap="truncate-end">
-              {`→ ${row.text}`}
-            </Text>
-          ),
-        )}
-        {close}
       </Box>
     )
   })
