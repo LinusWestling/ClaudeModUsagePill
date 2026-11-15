@@ -40,6 +40,8 @@ export type AgentRun = {
   status: AgentStatus
   /** What it is doing now. */
   activity?: string
+  /** What it did just before, newest first: a short trail under the current line. */
+  recent?: string[]
   tools: number
   /** The context its last request carried. */
   tokens?: number
@@ -62,8 +64,6 @@ declare module 'claude-code' {
       isWorking: boolean
       agents: Shaped<AgentRun[]>
       agentTick: number
-      /** The agent whose transcript the mod's own pane shows, where the main view can't. */
-      transcriptOf: string | null
     }
   }
 }
