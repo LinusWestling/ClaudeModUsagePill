@@ -5,12 +5,10 @@ import {
   endLabel,
   firstSentence,
   metaLine,
-  nextActivity,
   progressLine,
   shortModel,
   stepLine,
   summaryLine,
-  transcriptRows,
   upsertRun,
 } from '../hooks/agents'
 import { OUTFITS, mascotMarkup, mascotSvg, pickOutfit } from '../hooks/mascot'
@@ -43,6 +41,8 @@ const standIn = (on: any, opened: string[] = []) => {
   on('turn.start', (_: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
   on('tool.call', () => ({ result: {} }))
   on('turn.complete', () => ({ text: '' }))
+  on('ui.scroll', () => ({ value: {} }))
+  on('ui.close', () => ({ value: undefined }))
 }
 
 const SPAWN = {
@@ -56,7 +56,7 @@ const SPAWN = {
   fork: false,
 } as const
 
-test('a spawned agent shows its model, effort, doing and progress in the sidebar', async ($, on) => {
+test('a spawned agent shows its model, effort, its calls as they settle, and progress in the sidebar', async ($, on) => {
   standIn(on)
 
   await $.tool.call({
@@ -67,8 +67,8 @@ test('a spawned agent shows its model, effort, doing and progress in the sidebar
     effort: 'high',
   } as any)
   await $.agent.spawn(SPAWN as any)
-  await $.tool.call({ tool: 'Grep', pattern: 'mascot', agentId: 'a1' } as any)
-  await $.tool.call({ tool: 'Read', file_path: '/repo/hooks/pill.ts', agentId: 'a1' } as any)
+  await $.tool.call({ tool: 'Grep', tool_use_id: 'u1', pattern: 'mascot', agentId: 'a1' } as any)
+  await $.tool.call({ tool: 'Read', tool_use_id: 'u2', file_path: '/repo/hooks/pill.ts', agentId: 'a1' } as any)
 
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -77,10 +77,13 @@ test('a spawned agent shows its model, effort, doing and progress in the sidebar
     expect((await ui.find({ type: 'Text', text: /Haiku 5.5/ }))?.text).toBe(
       'Haiku 5.5 · high effort · Explore',
     )
-    expect((await ui.find({ type: 'Text', text: /Reading pill.ts/ }))?.text).toBe('● Reading pill.ts')
-    // What it did just before stays under the current line.
-    expect((await ui.find({ type: 'Text', text: /Searching for mascot/ }))?.text).toBe('  Searching for mascot')
+    // Each call a row of its own, newest last, ticked off with its time.
+    const calls = (await ui.findAll({ type: 'Text', text: /Reading pill.ts|Searching for mascot/ })).map(t => t.text)
+    expect(calls).toEqual(['Searching for mascot', 'Reading pill.ts'])
+    expect((await ui.findAll({ type: 'Text', text: '✓' })).length).toBe(2)
     expect((await ui.find({ type: 'Text', text: /2 tools/ })) !== undefined).toBe(true)
+    // Running, the card's action is a real button to watch it live.
+    expect((await ui.find({ key: 'open-a1' }))?.text.includes('Watch live')).toBe(true)
 
     if (surface !== 'terminal') {
       expect(((await ui.find({ type: 'Svg' })) as any).props.alt).toBe(
@@ -214,22 +217,44 @@ test('the default type and effort are left out, a report reads as one sentence',
   })
 })
 
-test('where the main view cannot switch, the transcript opens in a pane of its own', async ($, on) => {
-  const opened: string[] = []
+
+const TRANSCRIPT = {
+  ...PANE,
+  requestId: 'usage-pill-transcript',
+  props: { ...PANE.props, title: 'Chat · Map the repo' },
+} as const
+
+const PROMPT = { role: 'user', content: [{ type: 'text', text: 'Review the email copy' }] }
+const READ = {
+  role: 'assistant',
+  content: [
+    { type: 'thinking', thinking: 'The template comes first.' },
+    { type: 'text', text: 'Reading the **template** first.' },
+    { type: 'tool_use', id: 'u1', name: 'Read', input: { file_path: '/repo/email/1.html' } },
+  ],
+}
+const RESULT = { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'u1', content: '<html>hi</html>' }] }
+
+/**
+ * Stands in for a session whose main view can't show an agent, its messages
+ * whatever `chat.messages` holds then; the test spawns the agent.
+ */
+const desktopSession = (on: any, opened: string[] = []) => {
+  const chat = { messages: [PROMPT] as unknown[] }
+
   standIn(on, opened)
   on('ui.view', () => ({ value: { deny: 'the session draws no main view' } }))
-  on('session.messages', () => ({
-    value: [
-      { role: 'user', text: 'Review the email copy', toolUses: [] },
-      {
-        role: 'assistant',
-        text: 'Reading the template first.',
-        toolUses: [{ tool_use_id: 'u1', tool: 'Read', input: { file_path: '/repo/email/1.html' } }],
-      },
-      { role: 'user', text: '', toolUses: [], toolResults: [] },
-    ],
+  on('session.messages', (_: unknown, e: { as?: string }) => ({
+    value: e.as === 'api' ? chat.messages : [],
   }))
 
+  return chat
+}
+
+test('where the main view cannot switch, the chat opens in a pane of its own', async ($, on) => {
+  const opened: string[] = []
+  const chat = desktopSession(on, opened)
+  chat.messages = [PROMPT, READ, RESULT]
   await $.agent.spawn(SPAWN as any)
 
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -237,46 +262,112 @@ test('where the main view cannot switch, the transcript opens in a pane of its o
     const pane = await $.ui.mount({ ...PANE, surface })
     await pane.press({ key: 'open-a1' })
     expect(opened).toEqual(['usage-pill-transcript'])
+    // The card now says its chat is the one on show.
+    expect((await pane.find({ key: 'viewing-a1' }))?.text.includes('Viewing')).toBe(true)
     await pane.unmount()
 
-    const transcript = await $.ui.mount({
-      ...PANE,
-      surface,
-      requestId: 'usage-pill-transcript',
-      props: { ...PANE.props, title: 'Transcript · Map the repo' },
-    })
+    const transcript = await $.ui.mount({ ...TRANSCRIPT, surface })
     expect((await transcript.find({ type: 'Text', text: /Review the email/ }))?.text).toBe('Review the email copy')
-    expect((await transcript.find({ type: 'Text', text: /Reading the template/ })) !== undefined).toBe(true)
-    expect((await transcript.find({ type: 'Text', text: /Reading 1.html/ }))?.text).toBe('→ Reading 1.html')
+    expect((await transcript.find({ type: 'Markdown' }))?.text).toBe('Reading the **template** first.')
+    // A call is one row; pressed, it opens on what it was given and what came back.
+    expect((await transcript.find({ key: 'tu1' }))?.text.includes('Reading 1.html')).toBe(true)
+    expect(await transcript.find({ type: 'Code' })).toBe(undefined)
+    await transcript.press({ key: 'tu1' })
+    const code = (await transcript.findAll({ type: 'Code' })).map(c => c.text)
+    expect(code[0]!.includes('"file_path": "/repo/email/1.html"')).toBe(true)
+    expect(code[1]).toBe('<html>hi</html>')
+    await transcript.press({ key: 'tu1' })
+    await transcript.press({ key: 'close-transcript' })
     await transcript.unmount()
   }
 })
 
-test('a transcript keeps its latest rows and leaves out empty tool results', () => {
-  const many = Array.from({ length: 100 }, (_, i) => ({
-    role: 'assistant' as const,
-    text: `step ${i}`,
-    toolUses: [],
-  }))
-  const rows = transcriptRows([{ role: 'user', text: '', toolUses: [] }, ...many], 10)
-  expect(rows.length).toBe(10)
-  expect(rows[9]!.text).toBe('step 99')
+test('a streaming step passes every chunk on untouched and shows in the chat as it comes', async ($, on) => {
+  const chat = desktopSession(on)
+  const CHUNKS = [
+    { kind: 'thinking', index: 0, text: 'Hmm' },
+    { kind: 'text', index: 1, text: 'All ' },
+    { kind: 'text', index: 1, text: 'good.' },
+    { kind: 'stop', stopReason: 'end_turn', usage: null },
+  ]
+  on('turn.step', async function* (_: unknown, e: { turnId: string; index: number }) {
+    for (const chunk of CHUNKS) yield chunk
+
+    return { turnId: e.turnId, index: e.index, answer: 'All good.', toolUses: [], stopReason: 'end_turn', usage: null }
+  } as any)
+
+  await $.agent.spawn(SPAWN as any)
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.press({ key: 'open-a1' })
+  await pane.unmount()
+
+  const step = { turnId: 't1', index: 0, model: 'claude-haiku-5-5', messageCount: 1, agentId: 'a1' }
+  const seen: unknown[] = []
+  const stream = $.turn.step(step)
+  let read = await stream.next()
+
+  while (!read.done) {
+    seen.push(read.value)
+    read = await stream.next()
+  }
+
+  expect(seen).toEqual(CHUNKS)
+  expect(read.value.answer).toBe('All good.')
+
+  // The transcript doesn't hold the response yet: the chat shows it from the stream.
+  const transcript = await $.ui.mount({ ...TRANSCRIPT, surface: 'desktop' })
+  expect((await transcript.find({ type: 'Markdown' }))?.text).toBe('All good.')
+  expect((await transcript.find({ key: 'live-t1-0-0' }))?.text.includes('Thought')).toBe(true)
+  await transcript.unmount()
+
+  // Once it does (by the turn's end at the latest), the stream's copy goes and nothing shows twice.
+  chat.messages = [PROMPT, { role: 'assistant', content: [{ type: 'thinking', thinking: 'Hmm' }, { type: 'text', text: 'All good.' }] }]
+  await $.turn.complete({ agentId: 'a1', turnId: 't1', reason: 'answer', answer: 'All good.', durationMs: 1, isAborted: false } as any)
+
+  const after = await $.ui.mount({ ...TRANSCRIPT, surface: 'desktop' })
+  expect((await after.findAll({ type: 'Markdown', text: 'All good.' })).length).toBe(1)
+  await after.unmount()
 })
 
-test('the trail keeps the two latest things it did, and steps say where it is', () => {
-  let run = upsertRun([], 'a', {}, NOW)[0]!
-  for (const doing of ['Reading a', 'Thinking', 'Reading b', 'Reading c', 'Reading d']) {
-    run = { ...run, ...nextActivity(run, doing) }
-  }
-  expect(run.activity).toBe('Reading d')
-  expect(run.recent).toEqual(['Reading c', 'Reading b'])
+test("a finished agent's report is marked and can be copied", async ($, on) => {
+  const copied: string[] = []
+  const chat = desktopSession(on)
+  on('ui.copy', (_: unknown, e: { text: string }) => {
+    copied.push(e.text)
 
-  const steps = [
-    { content: 'Read', status: 'completed' as const },
-    { content: 'Fix the bug', status: 'in_progress' as const },
-    { content: 'Test', status: 'pending' as const },
-  ]
-  expect(stepLine({ ...run, steps })).toBe('Step 2 of 3 · Fix the bug')
-  expect(stepLine({ ...run, steps: steps.map(s => ({ ...s, status: 'completed' as const })) })).toBe('All 3 steps done')
-  expect(stepLine(run)).toBe(undefined)
+    return { value: { isCopied: true } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  chat.messages = [PROMPT, { role: 'assistant', content: [{ type: 'text', text: 'Fixed 3 links.' }] }]
+  await $.agent.spawn(SPAWN as any)
+
+  await $.turn.complete({ agentId: 'a1', turnId: 't1', reason: 'answer', answer: 'Fixed 3 links.', durationMs: 1, isAborted: false } as any)
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await pane.find({ key: 'open-a1' }))?.text).toBe('Open chat')
+  await pane.press({ key: 'open-a1' })
+  await pane.unmount()
+
+  const transcript = await $.ui.mount({ ...TRANSCRIPT, surface: 'desktop' })
+  expect((await transcript.find({ type: 'Text', text: /Final report/ }))?.text).toBe('✓ Final report')
+  await transcript.press({ key: 'copy-report' })
+  expect(copied).toEqual(['Fixed 3 links.'])
+  await transcript.unmount()
+})
+
+test('a card keeps its latest calls and folds the rest behind a count', async ($, on) => {
+  standIn(on)
+  await $.agent.spawn(SPAWN as any)
+
+  for (let i = 1; i <= 7; i++) {
+    await $.tool.call({ tool: 'Read', tool_use_id: `u${i}`, file_path: `/repo/f${i}.ts`, agentId: 'a1' } as any)
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'feed-a1' }))?.text).toBe('+2 earlier')
+  expect(await ui.find({ type: 'Text', text: 'Reading f2.ts' })).toBe(undefined)
+  await ui.press({ key: 'feed-a1' })
+  expect((await ui.find({ type: 'Text', text: 'Reading f1.ts' })) !== undefined).toBe(true)
+  expect((await ui.find({ key: 'feed-a1' }))?.text).toBe('Show fewer')
+  await ui.unmount()
 })
