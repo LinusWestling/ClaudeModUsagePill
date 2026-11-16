@@ -3,7 +3,15 @@ import { expect, test } from 'claude-code/testing'
 const BAND = {
   plugin: 'usage-pill',
   component: 'AbovePrompt',
-  props: { hasSurvey: false, isWorking: true, maxRows: 10, bodyColumns: 100 },
+  props: {
+    hasSurvey: false,
+    isCollapsed: false,
+    isWorking: true,
+    maxRows: 10,
+    bodyColumns: 100,
+    scroll: { offset: 0, bodyRows: 10 },
+    view: {},
+  },
 } as const
 
 const NOW = Date.parse('2026-11-04T12:00:00Z')
@@ -193,7 +201,8 @@ test('on Windows the border lands on the row, which starts lower in the drawing'
 })
 
 test('elsewhere it keeps the macOS measurements', async ($, on) => {
-  seed(on, { reading: READING, cache: CACHE })
+  seed(on, { reading: READING, cache: CACHE })
+
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source

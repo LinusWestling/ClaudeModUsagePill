@@ -38,10 +38,8 @@ export type AgentRun = {
   model?: string
   effort?: string | number
   status: AgentStatus
-  /** What it is doing now. */
+  /** What it is doing now: a tool's label, or `Thinking` between tools. */
   activity?: string
-  /** What it did just before, newest first: a short trail under the current line. */
-  recent?: string[]
   tools: number
   /** The context its last request carried. */
   tokens?: number
@@ -52,6 +50,43 @@ export type AgentRun = {
   outfit: Outfit
   /** The report it handed back, cut to its opening sentence. */
   answer?: string
+}
+
+export type ToolStatus = 'running' | 'ok' | 'error'
+
+/** One tool call of a subagent, as its `tool.call` started and settled it. */
+export type ToolEntry = {
+  /** The call's `tool_use_id`. */
+  id: string
+  tool: string
+  /** What it does, in a few words: `Reading pill.ts`. */
+  label: string
+  startedAt: number
+  endedAt?: number
+  status: ToolStatus
+}
+
+/** A block of the response a subagent is streaming now, as its chunks arrived. */
+export type LiveBlock = {
+  /** The block's place in the response, as its chunks number it. */
+  index: number
+  kind: 'text' | 'thinking' | 'tool'
+  /** The text so far; for a tool, its arguments' JSON so far. */
+  text: string
+  /** A tool's `tool_use_id` and name. */
+  id?: string
+  name?: string
+}
+
+/** The step a subagent is streaming, until its transcript holds what it said. */
+export type LiveTail = {
+  turnId: string
+  step: number
+  /** How many messages the step's request carried: its own response comes after them. */
+  from: number
+  blocks: LiveBlock[]
+  /** The response is whole: no caret, and it goes once the transcript has it. */
+  isDone: boolean
 }
 
 declare module 'claude-code' {
@@ -66,6 +101,18 @@ declare module 'claude-code' {
       agentTick: number
       /** The agent whose transcript the mod's own pane shows, where the main view can't. */
       transcriptOf: string | null
+      /** Each agent's latest tool calls, oldest first, by agent id. */
+      toolFeed: StateFamily<Shaped<ToolEntry[]>>
+      /** The agents whose card lists every tool call, not just the latest. */
+      feedOpen: string[]
+      /** What each agent is streaming now, by agent id; null between steps. */
+      liveTail: StateFamily<Shaped<LiveTail | null>>
+      /** Bumped when the transcript pane's agent has new messages to read. */
+      chatRev: number
+      /** The transcript pane's rows opened to their detail, by row key. */
+      chatOpen: string[]
+      /** Whether the transcript pane keeps to its end as the agent goes on. */
+      follow: boolean
     }
   }
 }

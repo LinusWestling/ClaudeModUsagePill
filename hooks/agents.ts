@@ -120,16 +120,6 @@ export const elapsed = (ms: number): string => {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-/** Moves what it was doing into its trail when it starts something new. */
-export const nextActivity = (run: AgentRun | undefined, activity: string): Partial<AgentRun> => {
-  const was = run?.activity
-
-  // Thinking is between steps, not a step: it is not worth a line of the trail.
-  if (!was || was === activity || was === 'Thinking') return { activity }
-
-  return { activity, recent: [was, ...(run?.recent ?? []).filter(r => r !== was)].slice(0, 2) }
-}
-
 /** The step it is on, with where that is in its list: `Step 2 of 4 · Run the tests`. */
 export const stepLine = (run: AgentRun): string | undefined => {
   if (run.steps.length === 0) return undefined
@@ -219,50 +209,4 @@ export const summaryLine = (runs: AgentRun[], now: number): { counts: string; to
     counts,
     totals: [elapsed(end - start), `${tools} ${tools === 1 ? 'tool' : 'tools'}`].join(' · '),
   }
-}
-
-/** The pane that shows a subagent's transcript where the main view can't switch to it. */
-export const TRANSCRIPT_PANE = 'usage-pill-transcript'
-
-export type TranscriptRow = { key: string; kind: 'prompt' | 'text' | 'tool' | 'error'; text: string }
-
-type TranscriptMessage = {
-  role: 'user' | 'assistant'
-  text: string
-  toolUses: { tool_use_id: string; tool: string; input: Record<string, unknown>; isError?: true }[]
-}
-
-const clip = (text: string, room: number): string =>
-  text.length > room ? `${text.slice(0, room - 1).trimEnd()}…` : text
-
-/**
- * An agent's conversation as rows to read: the prompt it was given, what it said,
- * and each tool it ran in a line. Only the latest `max` rows are kept, so a long run
- * stays within what a pane draws.
- */
-export const transcriptRows = (messages: TranscriptMessage[], max = 80): TranscriptRow[] => {
-  const rows: TranscriptRow[] = []
-
-  messages.forEach((m, i) => {
-    const text = m.text.trim()
-
-    if (m.role === 'user') {
-      // Tool results ride on user messages with no text of their own.
-      if (text) rows.push({ key: `m${i}`, kind: 'prompt', text: clip(text, 1_200) })
-
-      return
-    }
-
-    if (text) rows.push({ key: `m${i}`, kind: 'text', text: clip(text, 2_000) })
-
-    for (const use of m.toolUses) {
-      rows.push({
-        key: `t${use.tool_use_id}`,
-        kind: use.isError ? 'error' : 'tool',
-        text: describeTool(use.tool, use.input),
-      })
-    }
-  })
-
-  return rows.slice(-max)
 }

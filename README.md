@@ -56,7 +56,9 @@ Then restart Claude Code: the update applies after a restart.
 
 ## Subagents
 
-While subagents run, a sidebar lists each one, drawn by a Claude mascot in its own outfit. A running agent gets a card with its model, how long it has run, what it is doing now and the two things it did just before, the step it is on when it keeps a task list, and its tools, time and context. A finished one shrinks to a row with how it ended, how long it took and the first sentence of its report, or a note if it ended before reporting back. **View transcript** opens the agent's transcript in Claude Code's own transcript view; where the app won't switch to it, a notice says why. **Clear** removes the finished ones. Effort and agent type only show when they differ from the defaults. It opens when the first agent starts. To open it yourself, press the mascot in the bar's `Working` section, or run `/subagents`. The mascot in the bar walks while any subagent is running.
+While subagents run, a sidebar lists each one, drawn by a Claude mascot in its own outfit. A running agent gets a card with its model, how long it has run, the step it is on when it keeps a task list, and a live feed of its tool calls: the newest arrives at the bottom with a spinner and a ticking time, and settles to a ✓ or ✗ with how long it took, older calls fading back. `+N earlier` opens the card's full list. While Claude is thinking or writing between calls, the feed says so. A finished agent shrinks to a row with how it ended, how long it took and the first sentence of its report, or a note if it ended before reporting back. **Clear** removes the finished ones. Effort and agent type only show when they differ from the defaults. The sidebar opens when the first agent starts. To open it yourself, press the mascot in the bar's `Working` section, or run `/subagents`. The mascot in the bar walks while any subagent is running.
+
+Each card has a button for the agent's conversation: **● Watch live** while it runs, **Open chat** once it has finished, and **✓ Viewing** for the one on show. In the terminal it switches Claude Code's own transcript view to the agent, with **← Back to main** to return. In the desktop app, which has no such switch for mods, it opens a chat pane instead. The pane has a header with the agent's status, time and progress. The agent's text is formatted as Markdown, its thinking is folded into a row you can open, and each tool call is a row that opens on its input and a clipped result. Its reply streams in as it is written, with a caret at the end, and the pane follows it down. Scroll up and it stops following, with **Jump to latest ↓** to go back. Once the agent finishes, its report is highlighted, and **Copy report** copies it where the app allows. Opening another agent's chat switches the pane to it.
 
 An agent doesn't report how far along it is, so progress is what can be counted: steps if it keeps a task list, then tools run, time and context. There is no made-up percentage.
 
@@ -82,7 +84,7 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar and `task.ts` follows the task list.
+The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar, `task.ts` follows the task list, `feed.ts` keeps each agent's tool calls and `chat.ts` turns an agent's transcript and live stream into chat rows.
 
 ## License
 
