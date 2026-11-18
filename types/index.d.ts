@@ -89,9 +89,71 @@ export type LiveTail = {
   isDone: boolean
 }
 
+// ── 0.6.0 additions ─────────────────────────────────────────────────────────
+
+/** One reading of a rate-limit window, kept to project when it runs out. (Agent A) */
+export type LimitSample = { at: number; percent: number }
+
+/** What fills the context, as /context's categories put it, and what the last turn added. (Agent A) */
+export type Headroom = {
+  /** `color` is the theme key /context draws the category in. */
+  categories: { name: string; tokens: number; kind: string; color?: string }[]
+  /** Context tokens the last main-thread turn added; negative after a compaction. */
+  lastTurnDelta?: number
+  /** The main thread's largest tool result in the last turn, by estimated tokens. */
+  biggest?: { label: string; tokens: number }
+  at: number
+}
+
+// ── $.store (Agent A) ──
+// `$.store` is untyped (`get` resolves `unknown`); these are the shapes this mod
+// keeps there, checked on read.
+
+/** Under the store key `fiveHourSamples`: the 5-hour window's samples, which outlive a session. */
+export type StoredSamples = { resetsAt: string; samples: LimitSample[] }
+
+/** Tokens one loop spent, summed over its requests. (Agent C) */
+export type Spend = {
+  input: number
+  cacheRead: number
+  cacheWrite: number
+  output: number
+  requests: number
+}
+
+/** What the session spent and on whom, for /receipt. (Agent C) */
+export type Ledger = {
+  main: Spend
+  /** By agent id, with what to call it. */
+  agents: Record<string, Spend & { label: string; model?: string }>
+  /** The 5-hour window's percent when this session was first measured. */
+  sessionLimitAtStart?: number
+  weekLimitAtStart?: number
+}
+
+/** A module of the popover under the pill: Limits, Context and Cache from their chips, Session from /receipt. */
+export type Popover = 'limits' | 'context' | 'cache' | 'session'
+
 declare module 'claude-code' {
   interface PluginState {
     'usage-pill': {
+      // ── 0.6.0: Agent A (band) ──
+      /** The 5-hour window's readings since its last reset, oldest first. */
+      limitSamples: LimitSample[]
+      /** What fills the context; null until measured above the headroom threshold. */
+      headroom: Headroom | null
+      /** Until when the pill's mascot celebrates a finished task. */
+      celebrateUntil: number
+      // ── 0.6.0: Agent B (timeline) ──
+      /** Which view the Subagents pane shows. */
+      paneView: 'cards' | 'timeline'
+      // ── 0.6.0: Agent C (receipt, notify) ──
+      ledger: Ledger
+      /** When the current main-thread turn began; null while idle. */
+      turnStartedAt: number | null
+      /** The module the popover under the pill shows; null while it is closed. */
+      popover: Popover | null
+      // ── 0.5.0 ──
       reading: Reading | null
       cache: Cache | null
       minute: number
@@ -99,7 +161,7 @@ declare module 'claude-code' {
       isWorking: boolean
       agents: Shaped<AgentRun[]>
       agentTick: number
-      /** The agent whose transcript the mod's own pane shows, where the main view can't. */
+      /** The agent whose chat the Subagents pane shows in place of its list, where the main view can't; null on the list. */
       transcriptOf: string | null
       /** Each agent's latest tool calls, oldest first, by agent id. */
       toolFeed: StateFamily<Shaped<ToolEntry[]>>
@@ -107,11 +169,11 @@ declare module 'claude-code' {
       feedOpen: string[]
       /** What each agent is streaming now, by agent id; null between steps. */
       liveTail: StateFamily<Shaped<LiveTail | null>>
-      /** Bumped when the transcript pane's agent has new messages to read. */
+      /** Bumped when the chat's agent has new messages to read. */
       chatRev: number
-      /** The transcript pane's rows opened to their detail, by row key. */
+      /** The chat's rows and tool groups opened to their detail, by row key. */
       chatOpen: string[]
-      /** Whether the transcript pane keeps to its end as the agent goes on. */
+      /** Whether the chat keeps to its end as the agent goes on. */
       follow: boolean
     }
   }
