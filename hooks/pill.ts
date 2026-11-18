@@ -430,11 +430,12 @@ export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: 
 /**
  * A plain Button's width on the macOS desktop, in pixels, for a label of `n`
  * no-break spaces: `BUTTON_BASE + n * SPACE_WIDTH`, the base being the native
- * button's own padding. From two screenshots: 12 spaces made it 75px wide, and
- * the highlight of 4, placed at the band's left edge, was centred 18.7px into it.
+ * button's own padding. Measured on a hover screenshot (0.6.1): a 21-space
+ * button's highlight was 97.5px wide, and a no-break space of the 13px system
+ * font is 0.28em, 3.64px; the rest is the button's padding.
  */
-export const BUTTON_BASE = 18.75
-export const SPACE_WIDTH = 4.69
+export const BUTTON_BASE = 21
+export const SPACE_WIDTH = 3.64
 /**
  * Kept clear inside a segment's right divider, or the border for the last one. The
  * highlight is the button's whole box, whose padding is already in BUTTON_BASE.

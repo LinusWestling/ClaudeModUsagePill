@@ -151,7 +151,7 @@ export const contextGroups = <C extends { name: string; tokens: number; color?: 
  * and bars are drawn to it), and `columns` the same in cells (the terminal's
  * text versions).
  */
-export async function popoverPanel($: EngineInterface, e: RenderInput, width: number, columns: number) {
+export async function popoverPanel($: EngineInterface, e: RenderInput, width: number, columns: number, rowsLeft = Infinity) {
   const kind = await read($, popover)
 
   if (kind === null) return null
@@ -340,13 +340,52 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
     const heavyTurn = lastDelta !== undefined && window > 0 && lastDelta > window * 0.1
     const ROW_BAR_PX = 64
 
-    const groupRows = groups.map((g, gi) => (
-      <Box key={`context-group-${g.title}`} flexDirection="column" marginTop={gi === 0 ? 1 : 1}>
-        <Box flexDirection="row" columnGap={2} justifyContent="space-between" paddingX={1}>
-          <Text dimColor size="caption">
-            {g.title}
-          </Text>
-          <Text dimColor size="caption" tabular>{`${compact(g.tokens)} · ${percent(g.share)}`}</Text>
+    // One grid for group headers and rows alike, so every figure lines up:
+    // the dot, the name (growing), the bar, the tokens, the share.
+    const BAR_COLUMNS = 9
+    const TOKEN_COLUMNS = 6
+    const SHARE_COLUMNS = 5
+    const figures = (key: string, tokens: string, share: string, isDim: boolean) => [
+      <Box key={`${key}-tokens`} flexShrink={0} width={TOKEN_COLUMNS} justifyContent="flex-end">
+        <Text tabular dimColor={isDim}>
+          {tokens}
+        </Text>
+      </Box>,
+      <Box key={`${key}-share`} flexShrink={0} width={SHARE_COLUMNS} justifyContent="flex-end">
+        <Text tabular dimColor>
+          {share}
+        </Text>
+      </Box>,
+    ]
+
+    // The band scrolls a tree taller than its rows: what doesn't fit folds into one
+    // `n more` row per group, the smallest first, so the footer always shows. Fixed:
+    // the heading, the bar and its margin, the footer and its margin, and per group
+    // a header and its margin.
+    const fixed = 1 + 2 + 2 + groups.length * 2
+    const budget = Math.max(groups.length, rowsLeft - fixed)
+    const fitted = groups.map(g => ({ ...g, rows: [...g.rows], folded: [] as ContextRow[] }))
+    const rowCount = () => fitted.reduce((n, g) => n + g.rows.length + (g.folded.length > 0 ? 1 : 0), 0)
+
+    while (rowCount() > budget) {
+      // Fold from the group with the most rows; never its last one.
+      const g = [...fitted].sort((a, b) => b.rows.length - a.rows.length)[0]
+
+      if (!g || g.rows.length <= 1) break
+
+      g.folded.unshift(g.rows.pop()!)
+    }
+
+    const groupRows = fitted.map(g => (
+      <Box key={`context-group-${g.title}`} flexDirection="column" marginTop={1}>
+        <Box flexDirection="row" columnGap={1} alignItems="center" paddingX={1}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text dimColor size="caption" wrap="truncate-end">
+              {g.title}
+            </Text>
+          </Box>
+          <Box flexShrink={0} width={BAR_COLUMNS} />
+          {figures(`context-group-${g.title}`, compact(g.tokens), percent(g.share), true)}
         </Box>
         {g.rows.map(r => {
           const isBiggest = r === biggest
@@ -363,13 +402,15 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
               paddingX={1}
               {...(hasPictures && fill ? { backgroundColor: fill } : {})}
             >
-              <Text color={dot}>●</Text>
-              <Box flexGrow={1} flexShrink={1}>
+              <Box flexShrink={0}>
+                <Text color={dot}>●</Text>
+              </Box>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 <Text dimColor={!(isBiggest || isHeavyMcp)} wrap="truncate-end">
                   {r.name}
                 </Text>
               </Box>
-              <Box flexShrink={0} width={9} justifyContent="flex-end">
+              <Box flexShrink={0} width={BAR_COLUMNS}>
                 {hasPictures ? (
                   picture(
                     `context-rowbar-${r.name}`,
@@ -382,17 +423,26 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
                   <Text color={dot}>{blockBar(r.tokens / maxTokens, 8)}</Text>
                 )}
               </Box>
-              <Box flexShrink={0} width={5} justifyContent="flex-end">
-                <Text tabular>{compact(r.tokens)}</Text>
-              </Box>
-              <Box flexShrink={0} width={4} justifyContent="flex-end">
-                <Text tabular dimColor>
-                  {percent(r.share)}
-                </Text>
-              </Box>
+              {figures(`context-row-${r.name}`, compact(r.tokens), percent(r.share), false)}
             </Box>
           )
         })}
+        {g.folded.length === 0 ? null : (
+          <Box key={`context-more-${g.title}`} flexDirection="row" columnGap={1} paddingX={1}>
+            <Box flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text dimColor size="caption" wrap="truncate-end">
+                {`+ ${g.folded.length} more: ${g.folded.map(r => r.name).join(', ')}`}
+              </Text>
+            </Box>
+            <Box flexShrink={0} width={BAR_COLUMNS} />
+            {figures(
+              `context-more-${g.title}`,
+              compact(g.folded.reduce((n, r) => n + r.tokens, 0)),
+              percent(g.folded.reduce((n, r) => n + r.share, 0)),
+              true,
+            )}
+          </Box>
+        )}
       </Box>
     ))
 
@@ -400,7 +450,7 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
       heading(
         shown <= 0 ? 'No reading yet' : compact(shown),
         share === undefined ? undefined : tone(share),
-        share === undefined ? undefined : `of ${compact(window)} · ${Math.round(share)}%`,
+        share === undefined ? undefined : `of ${compact(window)} · ${Math.round(share)}% · ${compact(Math.max(0, window - shown))} free`,
       ),
       used.length === 0 || window <= 0
         ? null
@@ -428,10 +478,6 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
                   </Text>
                 </Box>
               )}
-              <Box flexDirection="row" justifyContent="space-between">
-                <Text dimColor size="caption" tabular>{`used ${compact(shown)}`}</Text>
-                <Text dimColor size="caption" tabular>{`${compact(Math.max(0, window - shown))} free`}</Text>
-              </Box>
             </Box>
           ),
       ...groupRows,

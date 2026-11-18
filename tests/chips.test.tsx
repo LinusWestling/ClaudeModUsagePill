@@ -393,17 +393,19 @@ for (const surface of ['desktop', 'terminal'] as const) {
 
     expect(t).toContain('Context')
     expect(t).toContain('860k')
-    expect(t).toContain('of 1M · 86%')
-    expect(t).toContain('used 860k')
-    expect(t).toContain('140k free')
-    // Messages is the conversation; the rest is always loaded. Subtotals are of what is used.
+    expect(t).toContain('of 1M · 86% · 140k free')
+    // Messages is the conversation; the rest is always loaded. Subtotals are of what
+    // is used, in the same columns as the rows.
     expect(t).toContain('Conversation')
     expect(t).toContain('Always loaded')
-    expect(t).toContain('700k · 81%')
-    expect(t).toContain('160k · 19%')
+    expect(t).toContain('160k')
+    expect(t).toContain('19%')
     expect(t).toContain('Messages')
     expect(t).toContain('700k')
+    expect(t).toContain('81%')
     expect(t).toContain('System tools')
+    // Ten rows of band: what doesn't fit folds into one row, and Compact now still shows.
+    expect(t).toContain('+ 1 more: System prompt')
     // The free space fills nothing.
     expect(t.includes('Free space')).toBe(false)
     expect((await ui.find({ key: 'popover-compact' }))?.text).toBe('Compact now')

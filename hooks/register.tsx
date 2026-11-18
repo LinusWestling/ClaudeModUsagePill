@@ -729,7 +729,39 @@ async function chatView($: EngineInterface, e: RenderInput<'Pane'>, id: string) 
     <Box flexDirection="column" rowGap={1}>
       {back}
       {header}
-      {'deny' in chat ? <Text color="warning">{chat.deny}</Text> : null}
+      {'deny' in chat ? (
+        // Workflow subagents and agents of another process keep their conversation
+        // where this session can't read it: what the mod saw of them is all there is.
+        <Box flexDirection="column" rowGap={1}>
+          <Text dimColor size="caption" wrap="wrap">
+            {isLive
+              ? 'Its conversation runs outside this session, so only its tool calls show here.'
+              : 'Its conversation ran outside this session (a workflow or another process), so only what it did shows here.'}
+          </Text>
+          {feed.length > 0 ? (
+            <Box flexDirection="column">
+              {feed.map(c =>
+                gridRow(`feed-${c.id}`, {
+                  category: CATEGORY_LABEL[categoryOf(c.tool)],
+                  label: c.label,
+                  mark: c.status === 'ok' ? undefined : c.status,
+                  ms: spanOf([c]),
+                }),
+              )}
+            </Box>
+          ) : (
+            <Text dimColor size="caption">No tool calls seen.</Text>
+          )}
+          {!isLive && run?.answer ? (
+            <Box flexDirection="column" borderStyle="round" borderColor={STATUS_COLOR[status]} paddingX={1}>
+              <Text color={STATUS_COLOR[status]} weight="semibold">
+                {status === 'done' ? '✓ Report' : 'Last words'}
+              </Text>
+              <Markdown key="md-answer" text={run.answer} />
+            </Box>
+          ) : null}
+        </Box>
+      ) : null}
       {hidden > 0 ? <Text dimColor size="caption">{`${hidden} earlier rows not shown`}</Text> : null}
       {rows.length === 0 && 'entries' in chat ? <Text dimColor>Nothing in its transcript yet.</Text> : null}
       <Box flexDirection="column">
@@ -1219,7 +1251,10 @@ export const register: Register = (on, options) => {
       )
 
       // A chip's module, as wide as the band, its insides less a border and padding.
-      const panel = await popoverPanel($, e, (e.props.bodyColumns - 4) * CELL_WIDTH, e.props.bodyColumns - 4)
+      // Its rows: the band's, less the pill's row and the one it reaches into, the
+      // panel's border, and the headroom row when it shows.
+      const rowsLeft = e.props.maxRows - 2 - 2 - (room ? 1 : 0)
+      const panel = await popoverPanel($, e, (e.props.bodyColumns - 4) * CELL_WIDTH, e.props.bodyColumns - 4, rowsLeft)
       // The pill reaches a row below its own: what goes under it starts under that.
       return room || panel ? (
         <Box flexDirection="column">
@@ -1292,7 +1327,7 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    const panel = await popoverPanel($, e, 0, Math.max(20, e.props.bodyColumns - 2))
+    const panel = await popoverPanel($, e, 0, Math.max(20, e.props.bodyColumns - 2), e.props.maxRows - 2)
 
     return room || panel ? (
       <Box flexDirection="column">
