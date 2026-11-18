@@ -97,6 +97,37 @@ export const stackedBarSvg = (
   )
 }
 
+/**
+ * A bar of what fills the whole context window: one segment per category for the
+ * used part, the rest an empty track. Rounded, `height` tall.
+ */
+export const windowBarSvg = (
+  categories: readonly { name: string; tokens: number }[],
+  window: number,
+  width: number,
+  height: number,
+): string => {
+  const r = height / 2
+  let x = 0
+  let segments = ''
+
+  categories.forEach((c, i) => {
+    const w = window > 0 ? Math.min(width - x, (c.tokens / window) * width) : 0
+
+    if (w <= 0) return
+
+    segments += `<rect x="${x.toFixed(1)}" y="0" width="${Math.max(0, w - (i < categories.length - 1 ? 1 : 0)).toFixed(1)}" height="${height}" fill="${SEGMENT[i % SEGMENT.length]}"><title>${escapeXml(`${c.name}: ${compact(c.tokens)}`)}</title></rect>`
+    x += w
+  })
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
+    `<clipPath id="round"><rect width="${width}" height="${height}" rx="${r}"/></clipPath>` +
+    `<rect width="${width}" height="${height}" rx="${r}" fill="rgba(255,255,255,.1)"/>` +
+    `<g clip-path="url(#round)">${segments}</g></svg>`
+  )
+}
+
 /** The terminal's bar: cells shared out by tokens, each category in its own theme colour. */
 export const terminalBar = (
   categories: readonly { name: string; tokens: number }[],

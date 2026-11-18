@@ -1,7 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { ToolEntry } from '../types'
-import { duration, feedView, finishTool, settleTools, spinnerFrame, startTool } from '../hooks/feed'
+import { bashLabel, duration, feedView, fileLabel, finishTool, settleTools, shortPath, spinnerFrame, spinnerSvg, startTool } from '../hooks/feed'
+import { describeTool } from '../hooks/agents'
+import { mascotSvg } from '../hooks/mascot'
 
 const call = (id: string, startedAt = 0): ToolEntry => ({ id, tool: 'Read', label: `Reading ${id}`, startedAt, status: 'running' })
 
@@ -41,4 +43,34 @@ test('times read in tenths for quick calls, and the spinner turns', () => {
   expect(duration(-5)).toBe('0.0s')
   expect(spinnerFrame(0) === spinnerFrame(1)).toBe(false)
   expect(spinnerFrame(10)).toBe(spinnerFrame(0))
+})
+
+test('a shell call reads as its description, else its command without the leading cd', () => {
+  expect(bashLabel({ description: 'Run tests', command: 'npm test' })).toBe('Run tests')
+  expect(bashLabel({ command: 'cd /Users/me/.claude/dev-mods/abc/usage-pill && npm test' })).toBe('npm test')
+  expect(bashLabel({ command: "cd '/Users/me/x y'; ls -la" })).toBe('ls -la')
+  expect(bashLabel({ command: 'git status' })).toBe('git status')
+  expect(bashLabel({})).toBe('Bash')
+  expect(describeTool('Bash', { command: 'cd /Users/me/.claude/dev-mods/85f2b57a/usage-pill && claude plugin test .' })).toBe('claude plugin test .')
+})
+
+test('paths in a label lose the home folder and all but their last two segments', () => {
+  expect(shortPath('/Users/me/notes.md')).toBe('~/notes.md')
+  expect(shortPath('/Users/me/a/b')).toBe('~/a/b')
+  expect(shortPath('/Users/me/.claude/dev-mods/85f2b57a/usage-pill')).toBe('…/85f2b57a/usage-pill')
+  expect(shortPath('/var/log/system/deep/file.log')).toBe('…/deep/file.log')
+  expect(bashLabel({ command: 'ls /Users/me/.claude/dev-mods/85f2b57a/usage-pill/hooks' })).toBe('ls …/usage-pill/hooks')
+})
+
+test('file tools show the file name, with its folder for a bare index', () => {
+  expect(fileLabel('/Users/me/a/b/pill.ts')).toBe('pill.ts')
+  expect(fileLabel('/Users/me/site/blog/index.html')).toBe('blog/index.html')
+  expect(describeTool('Read', { file_path: '/Users/me/a/pill.ts' })).toBe('Reading pill.ts')
+  expect(describeTool('Edit', { file_path: 'C:\\Users\\me\\a\\x.ts' })).toBe('Editing x.ts')
+})
+
+test('animations lock to the wall clock, so a redraw carries on instead of restarting', () => {
+  expect(spinnerSvg(12, undefined, 1_000_300)).toContain('animation-delay:-300ms')
+  expect(spinnerSvg(12, undefined, 1_000_300)).toBe(spinnerSvg(12, undefined, 2_000_300))
+  expect(mascotSvg('moving', undefined, 28, 1_000_120)).toContain('animation-delay:-120ms')
 })

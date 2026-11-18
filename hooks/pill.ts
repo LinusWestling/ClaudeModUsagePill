@@ -1,14 +1,16 @@
-import { MASCOT_STYLE, mascotMarkup } from './mascot'
+import { lockPhase, mascotMarkup, mascotStyle } from './mascot'
 import type { Outfit } from '../types'
 import type { TaskView } from './task'
 
 export type PillModel = {
   task?: TaskView
   /**
-   * The 5-hour plan window; `out` (`out ~16:40`) when its pace runs out before the
-   * reset, which takes the place of the word `session`.
+   * The 5-hour plan window. `reset` is its reset as a bare local clock (`11:10`),
+   * which takes the place of the word `session` in the chip. `out` (`out ~16:40`)
+   * is set when its pace runs out before the reset: it turns the chip amber and
+   * is what the alt text says.
    */
-  session?: { percent: number; left?: string; out?: string }
+  session?: { percent: number; left?: string; out?: string; reset?: string }
   week?: number
   context?: { percent: number; label: string }
   /**
@@ -97,7 +99,14 @@ const escapeXml = (text: string) =>
 export type ChipKind = 'task' | 'session' | 'week' | 'context' | 'cache'
 
 /** Where a drawn chip lies across the drawing, in its pixels. */
-export type ChipExtent = { kind: ChipKind; x: number; width: number }
+export type ChipExtent = {
+  kind: ChipKind
+  x: number
+  width: number
+  /** The whole segment the chip owns, for its button: between its dividers, or the border. */
+  segStart: number
+  segEnd: number
+}
 
 type Gauge = {
   kind: Exclude<ChipKind, 'task'>
@@ -119,7 +128,7 @@ const gaugesOf = (m: PillModel): Gauge[] => {
       // Running out at this pace is a warning whatever the figure says yet.
       colors: m.session.out && colors === CORAL ? AMBER : colors,
       strong: `${Math.round(m.session.percent)}%`,
-      dim: m.session.out ?? 'session',
+      dim: m.session.reset ?? 'session',
     })
   }
 
@@ -217,7 +226,7 @@ const snapToCells = (chips: readonly { natural: number; least: number }[], start
   return widths
 }
 
-const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
+const draw = (m: PillModel, width: number, fit: Fit, cell?: number, now = 0) => {
   const { above, left: rowLeft, right: rowRight } = fit
   const mid = above + ROW / 2
   const text = (x: number, content: string, cls: string): string =>
@@ -301,7 +310,7 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
       body += text(start + bar + 10, count, 'value')
     }
 
-    chipsDrawn.push({ kind: 'task', x, width: w })
+    chipsDrawn.push({ kind: 'task', x, width: w, segStart: rowLeft + 1, segEnd: x + w })
     x += w + GAP
 
     if (gauges.length > 0) {
@@ -337,7 +346,7 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
       body += text(at + 4, g.dim, 'dim')
     }
 
-    chipsDrawn.push({ kind: g.kind, x, width: w })
+    chipsDrawn.push({ kind: g.kind, x, width: w, segStart: x - GAP, segEnd: x + w })
     x += w + GAP
 
     if (index < gauges.length - 1) {
@@ -349,9 +358,9 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
     `text{font:500 ${SIZE}px ${FONT};font-variant-numeric:tabular-nums;letter-spacing:-.05px}` +
     `.divider{fill:rgba(255,255,255,.12)}.track{fill:rgba(255,255,255,.1)}.ring{stroke:rgba(255,255,255,.12)}` +
     `.label{fill:#E8E8EC}.value{fill:#F7F7F8;font-weight:600}.dim{fill:#9A9AA3;font-weight:450}` +
-    `.sweep{animation:sweep 1.8s cubic-bezier(.45,0,.55,1) infinite}` +
-    `.pulse{animation:pulse 1.6s ease-in-out infinite}` +
-    MASCOT_STYLE +
+    `.sweep{animation:sweep 1.8s cubic-bezier(.45,0,.55,1) infinite;${lockPhase(now, 1800)}}` +
+    `.pulse{animation:pulse 1.6s ease-in-out infinite;${lockPhase(now, 1600)}}` +
+    mascotStyle(now) +
     `@keyframes sweep{to{transform:translateX(var(--travel))}}` +
     `@keyframes pulse{50%{opacity:.4}}` +
     `@media (prefers-reduced-motion:reduce){.sweep,.pulse{animation:none}}`
@@ -371,6 +380,9 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
   body =
     `<rect x="${rowLeft + 0.5}" y="${above + 0.5}" width="${size - rowLeft - rowRight - 1}" height="${ROW - 1}" rx="${CORNER}" fill="url(#edge)" fill-opacity=".05" stroke="url(#edge)" stroke-opacity=".8"/>` +
     body
+  const lastChip = chipsDrawn[chipsDrawn.length - 1]
+
+  if (lastChip) lastChip.segEnd = size - rowRight - 1
   const height = above + ROW
   const source =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${height}" viewBox="0 0 ${size} ${height}">` +
@@ -382,6 +394,7 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
     m.mascot && m.mascot.running > 0 && `${m.mascot.running} subagents running`,
     m.session &&
       `session ${Math.round(m.session.percent)}% used${m.session.left ? `, ${m.session.left}` : ''}` +
+        (m.session.reset ? `, resets at ${m.session.reset}` : '') +
         (m.session.out ? `, at this pace runs ${m.session.out}` : ''),
     m.week !== undefined && `week ${Math.round(m.week)}% used`,
     m.context && `context ${m.context.label}`,
@@ -393,7 +406,7 @@ const draw = (m: PillModel, width: number, fit: Fit, cell?: number) => {
 }
 
 /** Fills `width`, giving up the least important figures first when it is narrow. */
-export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: number) => {
+export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: number, now = 0) => {
   const attempts: PillModel[] = [
     m,
     { ...m, week: undefined },
@@ -402,16 +415,17 @@ export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: 
   ]
   const fitting = attempts.find(attempt => neededWidth(attempt) <= width - fit.left)
 
-  return draw(fitting ?? attempts[attempts.length - 1]!, width, fit, cell)
+  return draw(fitting ?? attempts[attempts.length - 1]!, width, fit, cell, now)
 }
 
 // ── The buttons over the chips ──────────────────────────────────────────────
 // The desktop band places a Box only in whole cells, and a Button has no width:
 // a plain one is as wide as its label. So each chip gets an invisible Button of
 // no-break spaces. Drawn with `cell`, every chip after the first starts on a
-// cell's edge, so its button starts exactly where it does; the button takes as
-// many spaces as fit inside the chip, a few pixels short of its divider, so its hover
-// highlight never reaches into the next chip.
+// cell's edge, just after its divider, so its button starts there; the button
+// takes as many spaces as fit before the segment's far divider (the border, for the
+// last), BUTTON_INSET short of it, so its hover highlight fills the segment
+// without reaching into the next chip.
 
 /**
  * A plain Button's width on the macOS desktop, in pixels, for a label of `n`
@@ -422,12 +436,12 @@ export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: 
 export const BUTTON_BASE = 18.75
 export const SPACE_WIDTH = 4.69
 /**
- * Kept clear before a chip's divider, against a button a little wider than measured:
- * the highlight is the button's whole box, whose padding is already in BUTTON_BASE, and
- * the mascot's measurement (a 4-space highlight centred 18.7px in) shows no asymmetric
- * inset; so the one correction left is erring narrower.
+ * Kept clear inside a segment's right divider, or the border for the last one. The
+ * highlight is the button's whole box, whose padding is already in BUTTON_BASE.
  */
-export const SAFETY = 3
+export const BUTTON_INSET = 3
+/** A button starts at the first cell edge this far after its segment's left divider. */
+export const BUTTON_LEAD = GAP
 
 /** One invisible Button over a chip: its left edge in band cells, its label in spaces. */
 export type ChipButton = { kind: ChipKind; left: number; spaces: number }
@@ -439,10 +453,10 @@ export type ChipButton = { kind: ChipKind; left: number; spaces: number }
  */
 export const chipButtons = (chips: readonly ChipExtent[], cell: number): ChipButton[] =>
   chips.map(c => {
-    // The first chip starts inside the row's inset, left of the band's first cell.
-    const left = Math.max(0, Math.ceil(c.x / cell - 1 - 1e-6))
-    // The room from the button's left edge to the chip's divider, in the band's pixels.
-    const room = c.x + c.width - (left + 1) * cell - SAFETY
+    // The first cell edge at or after the segment's start (the drawing sits one cell left of the band).
+    const left = Math.max(0, Math.ceil((c.segStart + BUTTON_LEAD) / cell - 1 - 1e-6))
+    // The room from the button's left edge to the segment's end, in the band's pixels.
+    const room = c.segEnd - BUTTON_INSET - (left + 1) * cell
     const spaces = Math.max(1, Math.floor((room - BUTTON_BASE) / SPACE_WIDTH))
 
     return { kind: c.kind, left, spaces }

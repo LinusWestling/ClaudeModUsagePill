@@ -1,4 +1,5 @@
 import type { AgentRun, AgentStatus } from '../types'
+import { bashLabel, fileLabel } from './feed'
 import { pickOutfit } from './mascot'
 
 export const PANE = 'usage-pill-agents'
@@ -62,7 +63,6 @@ export const shortModel = (model: string | undefined): string => {
 export const effortLabel = (effort: string | number | undefined): string =>
   effort === undefined ? 'default effort' : `${effort} effort`
 
-const base = (path: unknown): string => String(path ?? '').split(/[\\/]/).pop() ?? ''
 
 const cut = (text: string, room = 80): string => {
   const line = text.replace(/\s+/g, ' ').trim()
@@ -77,15 +77,15 @@ const hostOf = (url: unknown): string =>
 export const describeTool = (tool: string, args: Record<string, unknown>): string => {
   switch (tool) {
     case 'Read':
-      return cut(`Reading ${base(args.file_path)}`)
+      return cut(`Reading ${fileLabel(args.file_path)}`)
     case 'Edit':
     case 'NotebookEdit':
-      return cut(`Editing ${base(args.file_path ?? args.notebook_path)}`)
+      return cut(`Editing ${fileLabel(args.file_path ?? args.notebook_path)}`)
     case 'Write':
-      return cut(`Writing ${base(args.file_path)}`)
+      return cut(`Writing ${fileLabel(args.file_path)}`)
     case 'Bash':
     case 'PowerShell':
-      return cut(String(args.description ?? args.command ?? tool))
+      return cut(bashLabel(args, tool))
     case 'Grep':
       return cut(`Searching for ${String(args.pattern ?? '')}`)
     case 'Glob':

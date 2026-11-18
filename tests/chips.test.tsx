@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { MACOS, SAFETY, SPACE_WIDTH, WINDOWS, buildPill, buttonWidth, chipButtons } from '../hooks/pill'
+import { MACOS, BUTTON_INSET, SPACE_WIDTH, WINDOWS, buildPill, buttonWidth, chipButtons } from '../hooks/pill'
 import type { PillModel } from '../hooks/pill'
 import { NO_LEDGER } from '../hooks/receipt'
 
@@ -195,9 +195,11 @@ test('drawn for the band, every chip after the first starts on a cell, and its b
       // The same left edge as the chip (the first starts inside the row's inset).
       if (i > 0) expect(Math.abs(start - chip.x) < 1e-6).toBe(true)
       else expect(start - chip.x).toBeLessThanOrEqual(CELL)
-      // Never past its divider, and at most a space and the margin short of it.
-      expect(end).toBeLessThanOrEqual(chip.x + chip.width - SAFETY + 1e-6)
-      expect(chip.x + chip.width - end).toBeLessThanOrEqual(SPACE_WIDTH + SAFETY + 1e-6)
+      // The button spans its segment: it starts just after the left divider (within a cell),
+      // and ends at most one space short of the far divider less the inset, never past it.
+      expect(start - chip.segStart).toBeLessThanOrEqual(CELL + 2)
+      expect(end).toBeLessThanOrEqual(chip.segEnd - BUTTON_INSET + 1e-6)
+      expect(chip.segEnd - BUTTON_INSET - end).toBeLessThanOrEqual(SPACE_WIDTH + 1e-6)
     })
   }
 })
@@ -256,6 +258,9 @@ const look = async ($: any, surface: 'desktop' | 'terminal') => {
 
   return { ui, text: (await ui.findAll({ type: 'Text' })).map((t: any) => t.text) as string[] }
 }
+
+/** The terminal draws no pictures: nothing in its text is an Svg. */
+const svgs0 = (_: string[]) => 0
 
 const MODULES = ['Session limit', 'Context', 'Cache', 'Session']
 
@@ -365,10 +370,12 @@ for (const surface of ['desktop', 'terminal'] as const) {
     const t = text
 
     expect(t).toContain('Session limit')
-    expect(t.some(x => x.startsWith('87% ') && x.includes('resets'))).toBe(true)
+    expect(t).toContain('87%')
+    expect(t.some(x => x.startsWith('· resets '))).toBe(true)
     expect(t).toContain('Week')
-    expect(t.some(x => x.startsWith('31% · resets'))).toBe(true)
-    expect(t).toContain('This session used')
+    expect(t).toContain('31%')
+    expect(t.some(x => /^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d\d:\d\d$|^in /.test(x))).toBe(true)
+    expect(t).toContain('This session')
     expect(t).toContain('+49%')
 
     // Neutral below 70 used, amber from it, never green.
@@ -378,14 +385,22 @@ for (const surface of ['desktop', 'terminal'] as const) {
     await ui.unmount()
   })
 
-  test(`Context on the ${surface}: the share, a legend by size, and Compact now`, async ($, on) => {
+  test(`Context on the ${surface}: the share, grouped rows with subtotals, and Compact now`, async ($, on) => {
     seed(on, { reading: READING, cache: CACHE, task: TASK })
 
     const { ui, text } = await open($, surface, 'chip-context')
     const t = text
 
     expect(t).toContain('Context')
-    expect(t).toContain('860k of 1M · 86%')
+    expect(t).toContain('860k')
+    expect(t).toContain('of 1M · 86%')
+    expect(t).toContain('used 860k')
+    expect(t).toContain('140k free')
+    // Messages is the conversation; the rest is always loaded. Subtotals are of what is used.
+    expect(t).toContain('Conversation')
+    expect(t).toContain('Always loaded')
+    expect(t).toContain('700k · 81%')
+    expect(t).toContain('160k · 19%')
     expect(t).toContain('Messages')
     expect(t).toContain('700k')
     expect(t).toContain('System tools')
@@ -397,6 +412,8 @@ for (const surface of ['desktop', 'terminal'] as const) {
       const svgs: any[] = await ui.findAll({ type: 'Svg' })
 
       expect(svgs.some(s => String(s.props.alt).startsWith('Context by category: Messages 700k'))).toBe(true)
+    } else {
+      expect(svgs0(t)).toBe(0)
     }
 
     await ui.unmount()
@@ -447,5 +464,51 @@ test('Compact now in the Context module compacts', async ($, on) => {
 
   await ui.press({ key: 'popover-compact' })
   expect(toasts).toEqual(['Compacted: 860k → 90k tokens'])
+  await ui.unmount()
+})
+
+test('Limits on the desktop draws the chart, the stat tiles and the week bar', async ($, on) => {
+  seed(
+    on,
+    {
+      reading: READING,
+      cache: CACHE,
+      task: TASK,
+      ledger: { ...NO_LEDGER, sessionLimitAtStart: 38 },
+      limitSamples: [
+        { at: NOW - 60 * MIN, percent: 60 },
+        { at: NOW - 30 * MIN, percent: 74 },
+        { at: NOW, percent: 87 },
+      ],
+    },
+    [],
+    { rateLimits: [{ ...RATES[0]!, resetsAt: '2026-11-17T14:00:00Z' }, RATES[1]!] },
+  )
+
+  const { ui, text } = await open($, 'desktop', 'chip-session')
+  const svgs: any[] = await ui.findAll({ type: 'Svg' })
+  const chart = svgs.find(s => String(s.props.alt).startsWith('Session limit 87% used'))
+
+  expect(chart).toBeTruthy()
+  expect(chart.props.height).toBe(116)
+  expect(chart.props.source.includes('>87%<')).toBe(true)
+  expect(chart.props.source.includes('>Limit<')).toBe(true)
+  expect(svgs.some(s => String(s.props.alt) === 'Week 31%')).toBe(true)
+  expect(text).toContain('At this pace')
+  expect(text).toContain('Pace')
+  expect(text.some(x => /^~\d+% \/ h$/.test(x))).toBe(true)
+  await ui.unmount()
+})
+
+test('Context on the desktop highlights the largest row and shows the last turn', async ($, on) => {
+  seed(on, { reading: READING, cache: CACHE, task: TASK, headroom: { categories: CATEGORIES, lastTurnDelta: 120_000, biggest: { label: 'Read register.tsx', tokens: 18_000 }, at: NOW } })
+
+  const { ui, text } = await open($, 'desktop', 'chip-context')
+
+  expect(text).toContain('Last turn')
+  expect(text).toContain('+120k')
+  expect(text).toContain('Read register.tsx ~18k')
+  // 120k is over a tenth of the 1M window: amber.
+  expect(((await ui.find({ type: 'Text', text: '+120k' })) as any).props.color).toBe('warning')
   await ui.unmount()
 })

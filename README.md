@@ -11,7 +11,7 @@ Working ▰▰▰▱▱ 3/5  |  ◔ 14% session  |  ◔ 11% week  |  ◔ 370k / 
 | Section | Meaning |
 | --- | --- |
 | **Task** | `Working` or `Done`, one bar segment per step of Claude's task list, and a count like `3/5`. The current step pulses. With no task list, a short bar sweeps instead of showing a made-up percentage. |
-| **Session** | How much of your 5-hour plan limit is used. Reads `out ~16:40` when you are on pace to run out. |
+| **Session** | How much of your 5-hour plan limit is used, then when it resets as a clock time, like `17% 11:10`. It turns amber when you are on pace to run out first. |
 | **Week** | How much of your weekly plan limit is used. |
 | **Context** | Tokens in the context window against its size. |
 | **Cache** | `Warm` or `Cold`. The ring empties as the cache ages. Reads `Cools 4m` when it is about to go cold. |
@@ -24,7 +24,7 @@ When Claude finishes a turn with every step of its task list done, the mascot in
 
 ## Forecast and cache
 
-The mod records the 5-hour window's percent over time, across sessions in the same window. From the readings in the last 90 minutes (at least two, 10 minutes apart) it projects your pace. If that pace reaches 100% before the reset, the session chip reads `out ~16:40` in local time, or `out in 1h 20m` if the time zone is unknown. It turns amber at least. Otherwise it says `session` as before.
+The mod records the 5-hour window's percent over time, across sessions in the same window. From the readings in the last 90 minutes (at least two, 10 minutes apart) it projects your pace. If that pace reaches 100% before the reset, the session chip turns amber, and its alt text and the Limits chart say `out ~16:40` in local time, or `out in 1h 20m` if the time zone is unknown. The chip itself always shows the reset time, or `session` if the time zone is unknown.
 
 With under 10 minutes of warm cache left, the cache chip reads `Cools 4m` in amber. At 5 minutes, while Claude is idle, a toast says "Cache cools in 5 min. Your next message would re-read 410k tokens." On the desktop app a native notification is also booked for that moment. The app drops it if you come back to the session first. The same one-hour estimate caveat applies as for warm and cold.
 
@@ -46,8 +46,8 @@ Press a chip in the bar and its details open right under it, above the prompt. O
 
 | Chip | Opens |
 | --- | --- |
-| Session or week | **Limits**: the session limit with when it runs out at this pace and when it resets, a chart of the 5-hour window with the pace line, the week's limit, and how much this session used. |
-| Context | **Context**: a bar of what fills the context, its five largest parts, what the last turn added, and **Compact now**. |
+| Session or week | **Limits**: the session percent and when it resets, a chart of the 5-hour window on a real clock (used so far, the pace line, the limit, and the stretch you would be blocked), three small tiles (`At this pace`, `This session`, `Pace`), and a week row with its bar and reset. |
+| Context | **Context**: a bar of the whole window with the used part split by category, then the categories in two groups, `Conversation` and `Always loaded`, each with its subtotal. The largest row is highlighted. A footer gives what the last turn added and its largest tool result, and **Compact now**. |
 | Cache | **Cache**: warm or cold and when it cools, what your next message reads from the cache, and this session's cache hit rate. |
 
 `/usage` opens Limits. `/receipt` opens **Session**: how long the session has run, its subagents, `≈ $X at API prices` when the session has a cost reading, and who spent the tokens, the main thread and each agent, with bars. Past 6 agents they are grouped by model.

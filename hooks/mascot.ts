@@ -174,10 +174,16 @@ const pixels = (list: readonly Pixel[]): string =>
     .map(([x, y, w, h, color]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${color}"/>`)
     .join('')
 
+/**
+ * The delay that puts an animation of `periodMs` at the wall clock's phase: a
+ * drawing redrawn later carries on where the last one was, not from frame 0.
+ */
+export const lockPhase = (now: number, periodMs: number): string => `animation-delay:-${Math.floor(now) % periodMs}ms`
+
 /** The rules `mascotMarkup`'s classes need, for the `<style>` of the drawing holding it. */
-export const MASCOT_STYLE =
-  `.m-bob{animation:m-bob .5s steps(1) infinite}` +
-  `.m-a{animation:m-a .5s steps(1) infinite}.m-b{animation:m-b .5s steps(1) infinite}` +
+export const mascotStyle = (now = 0): string =>
+  `.m-bob{animation:m-bob .5s steps(1) infinite;${lockPhase(now, 500)}}` +
+  `.m-a{animation:m-a .5s steps(1) infinite;${lockPhase(now, 500)}}.m-b{animation:m-b .5s steps(1) infinite;${lockPhase(now, 500)}}` +
   `@keyframes m-bob{50%{transform:translateY(-1px)}}` +
   `@keyframes m-a{0%{opacity:1}50%{opacity:0}}` +
   `@keyframes m-b{0%{opacity:0}50%{opacity:1}}` +
@@ -205,9 +211,9 @@ export const mascotMarkup = (mood: Mood, outfit?: Outfit): string => {
 }
 
 /** The mascot as a drawing of its own. */
-export const mascotSvg = (mood: Mood, outfit: Outfit | undefined, size: number): string =>
+export const mascotSvg = (mood: Mood, outfit: Outfit | undefined, size: number, now = 0): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 16 16" shape-rendering="crispEdges">` +
-  `<style>${MASCOT_STYLE}</style>${mascotMarkup(mood, outfit)}</svg>`
+  `<style>${mascotStyle(now)}</style>${mascotMarkup(mood, outfit)}</svg>`
 
 const BY_TYPE: Record<string, Outfit> = {
   Explore: 'explorer',

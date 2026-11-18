@@ -72,7 +72,9 @@ test('a pace that runs out before the reset names the time in the session chip, 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
 
-  expect(/>out (~\d\d:\d\d|in 1h 40m)</.test(svg.props.source)).toBe(true)
+  // The chip shows the reset as a bare clock, with no words; the run-out is in the alt text.
+  expect(/>\d\d:\d\d</.test(svg.props.source)).toBe(true)
+  expect(svg.props.source.includes('>out')).toBe(false)
   expect(svg.props.source.includes('>session<')).toBe(false)
   // Amber, though 50% alone would be calm.
   expect(svg.props.source.includes('stop-color="#FFB02E"')).toBe(true)
@@ -84,11 +86,15 @@ test('a pace that runs out before the reset names the time in the session chip, 
   await text.unmount()
 })
 
-test('with too few samples the chip says session, as before', async ($, on) => {
+test('with too few samples the chip stays calm', async ($, on) => {
   seed(on, { reading: reading(40_000, 50), limitSamples: [{ at: NOW, percent: 50 }] })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect((await svgSource(ui)).includes('>session<')).toBe(true)
+  // No pace: no amber, and the dim word is still the reset's clock (or `session` with no zone).
+  const source = await svgSource(ui)
+
+  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
+  expect(source.includes('stop-color="#FFB02E"')).toBe(false)
   await ui.unmount()
 })
 

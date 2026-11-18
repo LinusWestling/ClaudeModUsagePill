@@ -56,10 +56,12 @@ test('the band draws the task bar with its steps, and every figure as a ring', a
   const svg: any = await ui.find({ type: 'Svg' })
   const source: string = svg.props.source
 
-  for (const words of ['Working', '1/3', '24%', 'session', '41%', 'week', '48k / 200k', 'Warm', 'cache']) {
+  for (const words of ['Working', '1/3', '24%', '41%', 'week', '48k / 200k', 'Warm', 'cache']) {
     expect(source.includes(`>${words}<`)).toBe(true)
   }
 
+  // The chip's dim word is the reset's clock, or `session` where the zone is unknown.
+  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
   expect(source.includes('class="pulse"')).toBe(true)
   expect(svg.props.alt.includes('session 24% used, 2h 14m left')).toBe(true)
   await ui.unmount()
@@ -141,7 +143,7 @@ test('a narrow window gives up the weekly figure before the session', async ($, 
   })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
   expect(source.includes('>week<')).toBe(false)
-  expect(source.includes('>session<')).toBe(true)
+  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
   await ui.unmount()
 })
 
