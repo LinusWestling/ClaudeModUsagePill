@@ -15,18 +15,26 @@ export const OUTFITS: readonly Outfit[] = [
   'headphones',
 ]
 
-/** `moving` walks, `still` stands, and the last two wear the agent's result on the face. */
-export type Mood = 'moving' | 'still' | 'done' | 'failed'
+/**
+ * `moving` walks, `still` stands, `done` and `failed` wear the agent's result on the
+ * face, and `celebrate` throws its arms up in confetti when a task list is done.
+ */
+export type Mood = 'moving' | 'still' | 'done' | 'failed' | 'celebrate'
 
 type Pixel = readonly [x: number, y: number, w: number, h: number, color: string]
 
 const BODY = '#D97757'
 const EYE = '#1F1A17'
 
-const SHAPE: Pixel[] = [
-  [3, 6, 10, 6, BODY],
-  [1, 8, 2, 2, BODY],
-  [13, 8, 2, 2, BODY],
+const TORSO: Pixel = [3, 6, 10, 6, BODY]
+const SHAPE: Pixel[] = [TORSO, [1, 8, 2, 2, BODY], [13, 8, 2, 2, BODY]]
+/** Arms thrown up, out from the shoulders. */
+const CHEERING: Pixel[] = [
+  TORSO,
+  [2, 6, 1, 2, BODY],
+  [1, 4, 1, 2, BODY],
+  [13, 6, 1, 2, BODY],
+  [14, 4, 1, 2, BODY],
 ]
 
 const legs = (at: readonly number[]): Pixel[] => at.map(x => [x, 12, 1, 2, BODY])
@@ -38,17 +46,22 @@ const OPEN_EYES: Pixel[] = [
   [10, 8, 1, 2, EYE],
 ]
 
+/** Eyes squeezed shut in a smile. */
+const HAPPY_EYES: Pixel[] = [
+  [4, 9, 1, 1, EYE],
+  [5, 8, 1, 1, EYE],
+  [6, 9, 1, 1, EYE],
+  [9, 9, 1, 1, EYE],
+  [10, 8, 1, 1, EYE],
+  [11, 9, 1, 1, EYE],
+]
+
 const EYES: Record<Mood, Pixel[]> = {
   moving: OPEN_EYES,
   still: OPEN_EYES,
-  done: [
-    [4, 9, 1, 1, EYE],
-    [5, 8, 1, 1, EYE],
-    [6, 9, 1, 1, EYE],
-    [9, 9, 1, 1, EYE],
-    [10, 8, 1, 1, EYE],
-    [11, 9, 1, 1, EYE],
-  ],
+  done: HAPPY_EYES,
+  // The happy eyes and an open grin under them.
+  celebrate: [...HAPPY_EYES, [7, 10, 2, 1, EYE]],
   failed: [
     [4, 7, 1, 1, EYE],
     [6, 7, 1, 1, EYE],
@@ -140,6 +153,22 @@ const CLOTHES: Record<Outfit, Pixel[]> = {
   ],
 }
 
+/** Two sets of confetti that take turns, so it twinkles; one stays put without motion. */
+const CONFETTI_A: Pixel[] = [
+  [0, 1, 1, 1, '#FFD166'],
+  [4, 0, 1, 1, '#3FD0FF'],
+  [11, 1, 1, 1, '#FF4FA3'],
+  [15, 3, 1, 1, '#9B6BFF'],
+  [8, 2, 1, 1, '#7BE495'],
+]
+const CONFETTI_B: Pixel[] = [
+  [2, 2, 1, 1, '#FF4FA3'],
+  [6, 1, 1, 1, '#FFD166'],
+  [13, 0, 1, 1, '#3FD0FF'],
+  [10, 3, 1, 1, '#FFB02E'],
+  [0, 4, 1, 1, '#9B6BFF'],
+]
+
 const pixels = (list: readonly Pixel[]): string =>
   list
     .map(([x, y, w, h, color]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${color}"/>`)
@@ -156,6 +185,16 @@ export const MASCOT_STYLE =
 
 /** The mascot in grid units, with no outfit if none is given: place it with a transform. */
 export const mascotMarkup = (mood: Mood, outfit?: Outfit): string => {
+  if (mood === 'celebrate') {
+    // Over the outfit, so a tall hat doesn't hide it.
+    const confetti = `<g class="m-a">${pixels(CONFETTI_A)}</g><g class="m-b">${pixels(CONFETTI_B)}</g>`
+
+    return (
+      `<g class="m-bob">${pixels(CHEERING)}${pixels(STANDING)}${pixels(EYES.celebrate)}` +
+      `${outfit ? pixels(CLOTHES[outfit]) : ''}</g>${confetti}`
+    )
+  }
+
   const isMoving = mood === 'moving'
   const feet = isMoving
     ? `<g class="m-a">${pixels(STANDING)}</g><g class="m-b">${pixels(STRIDING)}</g>`

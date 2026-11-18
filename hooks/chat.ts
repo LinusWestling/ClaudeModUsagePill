@@ -2,9 +2,13 @@ import type { TurnStepChunk } from 'claude-code'
 
 import type { LiveBlock, LiveTail } from '../types'
 import { describeTool } from './agents'
+import { PLAN_TOOL, WRAP_UP_TOOL } from './task'
 
-/** The pane that shows a subagent's transcript where the main view can't switch to it. */
-export const TRANSCRIPT_PANE = 'usage-pill-transcript'
+/**
+ * The pane an earlier version opened for a subagent's chat. The chat now shows
+ * in the Subagents pane itself; this id is only closed, should one be left open.
+ */
+export const LEGACY_TRANSCRIPT_PANE = 'usage-pill-transcript'
 
 /** How often a streaming step writes what it has so far: smooth, without a redraw per token. */
 export const FLUSH_MS = 200
@@ -21,6 +25,8 @@ export type ChatEntry = { key: string; at: number } & (
       label: string
       /** Its arguments as JSON, clipped. */
       input: string
+      /** The file it read or changed, where its arguments name one. */
+      path?: string
       /** What the model read back, clipped; absent while it runs. */
       result?: string
       isError?: boolean
@@ -97,6 +103,9 @@ export const chatEntries = (messages: readonly ApiLike[]): ChatEntry[] => {
           tool,
           label: describeTool(tool, input),
           input: clip(json(input), 3_000),
+          ...(typeof (input.file_path ?? input.notebook_path) === 'string'
+            ? { path: String(input.file_path ?? input.notebook_path) }
+            : {}),
         }
 
         tools.set(id, row)
@@ -208,4 +217,211 @@ export const liveToolLabel = (name: string, partial: string): string => {
   }
 
   return describeTool(name, {})
+}
+
+export type ToolCallEntry = Extract<ChatEntry, { kind: 'tool' }>
+
+/**
+ * Everything an agent did between two things it said: its calls and its
+ * thoughts, as one line of the chat. `items` is what the run holds in order,
+ * `tools` its calls alone.
+ */
+export type Activity = { kind: 'activity'; key: string; items: ChatEntry[]; tools: ToolCallEntry[] }
+
+/** A row of the chat: a prompt, words the agent said, or a run of activity between them. */
+export type ChatRow = ChatEntry | Activity
+
+/** The task-list tools: bookkeeping, never shown or counted as work. */
+const HIDDEN_TOOLS: ReadonlySet<string> = new Set([PLAN_TOOL, WRAP_UP_TOOL])
+
+/**
+ * Folds every run of calls and thoughts between two texts (or prompts) into one
+ * activity row; the task-list tools are left out entirely. A run of thoughts
+ * alone is dropped, unless `isLive` holds for one of them (it is being thought
+ * now, so the line says so). The key is the run's first call's (else its first
+ * thought's), so its open state holds while the run grows.
+ */
+export const activityRuns = (
+  entries: readonly ChatEntry[],
+  isLive: (entry: ChatEntry) => boolean = () => false,
+): ChatRow[] => {
+  const rows: ChatRow[] = []
+  let run: ChatEntry[] = []
+
+  const close = () => {
+    const tools = run.filter((e): e is ToolCallEntry => e.kind === 'tool')
+
+    if (run.length > 0 && (tools.length > 0 || run.some(isLive))) {
+      rows.push({ kind: 'activity', key: `a${(tools[0] ?? run[0]!).key}`, items: run, tools })
+    }
+
+    run = []
+  }
+
+  for (const entry of entries) {
+    if (entry.kind === 'tool' && HIDDEN_TOOLS.has(entry.tool)) continue
+
+    if (entry.kind === 'tool' || entry.kind === 'thinking') {
+      run.push(entry)
+    } else {
+      close()
+      rows.push(entry)
+    }
+  }
+
+  close()
+
+  return rows
+}
+
+export type Category = 'read' | 'edit' | 'bash' | 'search' | 'web' | 'agent' | 'other'
+
+/** What kind of work a tool does, for counting a run and for its row's column. */
+export const categoryOf = (tool: string): Category => {
+  switch (tool) {
+    case 'Read':
+      return 'read'
+    case 'Edit':
+    case 'Write':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return 'edit'
+    case 'Bash':
+    case 'PowerShell':
+      return 'bash'
+    case 'Grep':
+    case 'Glob':
+      return 'search'
+    case 'WebFetch':
+    case 'WebSearch':
+      return 'web'
+    case 'Agent':
+    case 'Task':
+      return 'agent'
+    default:
+      return 'other'
+  }
+}
+
+/** A category's word in an opened run's column. */
+export const CATEGORY_LABEL: Record<Category | 'thought', string> = {
+  read: 'Read',
+  edit: 'Edit',
+  bash: 'Bash',
+  search: 'Search',
+  web: 'Web',
+  agent: 'Agent',
+  other: 'Tool',
+  thought: 'Thought',
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
+/** A category's share of a run, in plain words. */
+const phrase = (category: Category, n: number): string => {
+  switch (category) {
+    case 'read':
+      return `read ${plural(n, 'file', 'files')}`
+    case 'edit':
+      return `edited ${plural(n, 'file', 'files')}`
+    case 'bash':
+      return `ran ${plural(n, 'command', 'commands')}`
+    case 'search':
+      return n === 1 ? 'searched once' : `searched ${n} times`
+    case 'web':
+      return plural(n, 'web lookup', 'web lookups')
+    case 'agent':
+      return `started ${plural(n, 'agent', 'agents')}`
+    case 'other':
+      return plural(n, 'other tool', 'other tools')
+  }
+}
+
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1)
+
+/** A finished call, said in the past: `Edited headroom.tsx`, `Ran: Check the build`. */
+export const doneLabel = (tool: string, label: string): string => {
+  if (categoryOf(tool) === 'bash') return `Ran: ${label}`
+
+  const past: [RegExp, string][] = [
+    [/^Reading /, 'Read '],
+    [/^Editing /, 'Edited '],
+    [/^Writing /, 'Wrote '],
+    [/^Searching for /, 'Searched for '],
+    [/^Finding /, 'Searched for '],
+    [/^Fetching /, 'Fetched '],
+    [/^Searching the web/, 'Searched the web'],
+    [/^Starting an agent/, 'Started an agent'],
+    [/^Using /, 'Used '],
+  ]
+  const hit = past.find(([from]) => from.test(label))
+
+  return hit ? label.replace(hit[0], hit[1]) : label
+}
+
+/** A call still running, as the live line says it: `Running a command · Check the build`. */
+export const runningLabel = (tool: string, label: string): string =>
+  categoryOf(tool) === 'bash' ? `Running a command · ${label}` : label
+
+/** A call of a run, as the chat knows it now; `path` the file it read or changed, if any. */
+export type ActivityCall = { tool: string; label: string; state: 'running' | 'ok' | 'error'; path?: string }
+
+/**
+ * What a run's line says. While a call runs, that call (`Running a command ·
+ * Check the build`). One call: its own words in the past (`Edited headroom.tsx`).
+ * More: each kind of work counted, most first (`Read 7 files, ran 25 commands`),
+ * edits by distinct file where the paths are known. `failed` counts the errors.
+ */
+export const activitySummary = (calls: readonly ActivityCall[]): { text: string; failed: number; running?: string } => {
+  const failed = calls.filter(c => c.state === 'error').length
+  const running = calls.findLast(c => c.state === 'running')
+
+  if (running) return { text: runningLabel(running.tool, running.label), failed, running: running.label }
+  if (calls.length === 0) return { text: '', failed }
+  if (calls.length === 1) return { text: doneLabel(calls[0]!.tool, calls[0]!.label), failed }
+
+  const counts = new Map<Category, number>()
+  const edited = new Set<string>()
+
+  calls.forEach((call, i) => {
+    const category = categoryOf(call.tool)
+
+    // An edit counts once per file; one with no known path counts on its own.
+    if (category === 'edit') {
+      const file = call.path ?? `#${i}`
+
+      if (edited.has(file)) return
+      edited.add(file)
+    }
+
+    counts.set(category, (counts.get(category) ?? 0) + 1)
+  })
+
+  // Most first; a tie keeps the order the work came in.
+  const text = [...counts]
+    .sort((a, b) => b[1] - a[1])
+    .map(([category, n]) => phrase(category, n))
+    .join(', ')
+
+  return { text: capital(text), failed }
+}
+
+/** A row of an opened run: a call, or the thoughts in a row between calls as one. */
+export type RunRow = { kind: 'tool'; entry: ToolCallEntry } | { kind: 'thoughts'; key: string; texts: string[] }
+
+/** An opened run's rows: each call, and each stretch of thoughts folded into one row, keyed by its first. */
+export const runRows = (items: readonly ChatEntry[]): RunRow[] => {
+  const rows: RunRow[] = []
+
+  for (const item of items) {
+    const last = rows[rows.length - 1]
+
+    if (item.kind === 'tool') rows.push({ kind: 'tool', entry: item })
+    else if (item.kind === 'thinking') {
+      if (last?.kind === 'thoughts') last.texts.push(item.text)
+      else rows.push({ kind: 'thoughts', key: item.key, texts: [item.text] })
+    }
+  }
+
+  return rows
 }

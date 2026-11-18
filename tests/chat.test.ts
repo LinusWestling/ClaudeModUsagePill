@@ -1,6 +1,21 @@
 import { expect, test } from 'claude-code/testing'
 
-import { applyChunk, chatEntries, isDue, liveToolLabel, newTail, pendingBlocks, reportOf } from '../hooks/chat'
+import type { ActivityCall, ChatEntry, ChatRow } from '../hooks/chat'
+import {
+  activityRuns,
+  activitySummary,
+  applyChunk,
+  categoryOf,
+  chatEntries,
+  doneLabel,
+  isDue,
+  liveToolLabel,
+  newTail,
+  pendingBlocks,
+  reportOf,
+  runRows,
+  runningLabel,
+} from '../hooks/chat'
 
 test('a transcript reads as chat rows: the prompt, thoughts, words and calls with their outcome', () => {
   const rows = chatEntries([
@@ -82,4 +97,120 @@ test('the tail shows only what the transcript does not hold yet', () => {
   // Whole, and any of it in: all of it is.
   expect(pendingBlocks(committed, { ...tail, isDone: true })).toEqual([])
   expect(pendingBlocks(before, { ...tail, isDone: true }).length).toBe(2)
+})
+
+// ── A run of work between texts, as one line ────────────────────────────────
+
+const call = (id: string, tool = 'Read', extra: Partial<ChatEntry> = {}): ChatEntry =>
+  ({ key: `t${id}`, at: 0, kind: 'tool', id, tool, label: `${tool} ${id}`, input: '{}', ...extra }) as ChatEntry
+const said = (key: string, kind: 'text' | 'thinking' | 'prompt' = 'text'): ChatEntry => ({ key, at: 0, kind, text: key })
+const shape = (rows: ChatRow[]) => rows.map(r => (r.kind === 'activity' ? `[${r.items.map(i => i.key).join(' ')}]` : r.key))
+const ok = (tool: string, label = tool, extra: Partial<ActivityCall> = {}): ActivityCall => ({ tool, label, state: 'ok', ...extra })
+
+test('everything between two texts is one run, a single call included; thoughts never stand alone', () => {
+  const rows = activityRuns([
+    said('p', 'prompt'),
+    said('th0', 'thinking'),
+    call('1'),
+    said('th1', 'thinking'),
+    call('2'),
+    said('words'),
+    call('3'),
+    said('more'),
+    said('th2', 'thinking'),
+    said('end'),
+  ])
+
+  expect(shape(rows)).toEqual(['p', '[th0 t1 th1 t2]', 'words', '[t3]', 'more', 'end'])
+  // Keyed by its first call, so its open state holds as the run grows.
+  expect(rows[1]!.key).toBe('at1')
+})
+
+test('a run of thoughts alone shows only while it is being thought', () => {
+  const entries = [said('a'), said('th', 'thinking'), said('b')]
+
+  expect(shape(activityRuns(entries))).toEqual(['a', 'b'])
+  expect(shape(activityRuns(entries, e => e.key === 'th'))).toEqual(['a', '[th]', 'b'])
+})
+
+test('the task-list tools are left out of runs entirely', () => {
+  const rows = activityRuns([
+    said('a'),
+    call('1', 'mcp__ccd_turn__update_plan'),
+    call('2', 'Bash'),
+    call('3', 'mcp__ccd_turn__wrap_up'),
+    said('b'),
+    call('4', 'mcp__ccd_turn__update_plan'),
+  ])
+
+  expect(shape(rows)).toEqual(['a', '[t2]', 'b'])
+})
+
+test('tools fall into kinds of work', () => {
+  expect(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'Agent', 'Task', 'mcp__x__y'].map(categoryOf)).toEqual([
+    'read',
+    'edit',
+    'edit',
+    'edit',
+    'edit',
+    'bash',
+    'search',
+    'search',
+    'web',
+    'web',
+    'agent',
+    'agent',
+    'other',
+  ])
+})
+
+test('a run reads as its kinds of work counted, most first, with failures apart', () => {
+  const calls: ActivityCall[] = [
+    ok('Read'),
+    ok('Bash'),
+    ok('Bash'),
+    { ...ok('Bash'), state: 'error' },
+    ok('Read'),
+    ok('Grep'),
+    ok('Edit', 'Editing a.ts', { path: '/a.ts' }),
+    ok('Edit', 'Editing a.ts', { path: '/a.ts' }),
+    ok('Write', 'Writing b.ts', { path: '/b.ts' }),
+    ok('WebFetch'),
+    ok('Agent'),
+    ok('mcp__x__y'),
+  ]
+
+  expect(activitySummary(calls)).toEqual({
+    text: 'Ran 3 commands, read 2 files, edited 2 files, searched once, 1 web lookup, started 1 agent, 1 other tool',
+    failed: 1,
+  })
+  expect(activitySummary([ok('Grep'), ok('Glob'), ok('Read')]).text).toBe('Searched 2 times, read 1 file')
+})
+
+test('a run of one call says it in the past, with its own words', () => {
+  expect(activitySummary([ok('Edit', 'Editing headroom.tsx')]).text).toBe('Edited headroom.tsx')
+  expect(activitySummary([ok('Bash', 'Check compact number formatter')]).text).toBe('Ran: Check compact number formatter')
+  expect(doneLabel('Read', 'Reading pill.ts')).toBe('Read pill.ts')
+  expect(doneLabel('Grep', 'Searching for mascot')).toBe('Searched for mascot')
+  expect(doneLabel('mcp__x__y', 'Using x y')).toBe('Used x y')
+})
+
+test('while a call runs, the line says what it is doing now', () => {
+  const now = activitySummary([ok('Read'), { tool: 'Bash', label: 'Check the build', state: 'running' }, { ...ok('Grep'), state: 'error' }])
+
+  expect(now).toEqual({ text: 'Running a command · Check the build', failed: 1, running: 'Check the build' })
+  expect(runningLabel('Read', 'Reading pill.ts')).toBe('Reading pill.ts')
+  expect(activitySummary([])).toEqual({ text: '', failed: 0 })
+})
+
+test('opened, a run is a row per call and one per stretch of thoughts', () => {
+  const rows = runRows([said('a', 'thinking'), said('b', 'thinking'), call('1'), said('c', 'thinking'), call('2')])
+
+  expect(rows.map(r => (r.kind === 'tool' ? r.entry.key : `${r.key}×${r.texts.length}`))).toEqual(['a×2', 't1', 'c×1', 't2'])
+})
+
+test('a call names the file it touched', () => {
+  const rows = chatEntries([{ role: 'assistant', content: [{ type: 'tool_use', id: 'u1', name: 'Edit', input: { file_path: '/r/a.ts' } }] }])
+
+  expect(rows[0]).toMatchObject({ kind: 'tool', path: '/r/a.ts', label: 'Editing a.ts' })
 })
