@@ -47,8 +47,8 @@ Press a chip in the bar and its details open right under it, above the prompt. O
 | Chip | Opens |
 | --- | --- |
 | Session or week | **Limits**: the session percent and when it resets, a chart of the 5-hour window on a real clock (used so far, the pace line, the limit, and the stretch you would be blocked), three small tiles (`At this pace`, `This session`, `Pace`), and a week row with its bar and reset. |
-| Context | **Context**: a bar of the whole window with the used part split by category, then the categories in two groups, `Conversation` and `Always loaded`, each with its subtotal. The largest row is highlighted. A footer gives what the last turn added and its largest tool result, and **Compact now**. |
-| Cache | **Cache**: warm or cold and when it cools, what your next message reads from the cache, and this session's cache hit rate. |
+| Context | **Context**: a bar of the whole window with the used part split by category, then the categories in two groups, `Conversation` and `Always loaded`, each with its subtotal. The largest row is highlighted. When the bar has no room for every category, the smallest fold into one `▾ n more` row; click it to show them all, and `▴ Show less` to fold them again. A footer gives what the last turn added and its largest tool result, and **Compact now**. |
+| Cache | **Cache**: warm or cold, the minutes left and the time it cools, with a bar of the cache's hour and a mark where the warning comes. What your next message costs sent now against after it cools, in token-equivalents (a cache read costs a tenth of an input token, a cold start writes everything again at twice). The last reply split into tokens read from the cache, newly written and uncached. One bar per reply this session with cold starts in red, the hit rate, what the cache saved and when the cold starts were. A switch turns the five-minute warning off or on (kept across sessions), and **Compact now**. On a short bar the sections that matter least drop out first. |
 
 `/usage` opens Limits. `/receipt` opens **Session**: how long the session has run, its subagents, `≈ $X at API prices` when the session has a cost reading, and who spent the tokens, the main thread and each agent, with bars. Past 6 agents they are grouped by model.
 
@@ -141,7 +141,7 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar, `task.ts` follows the task list, `feed.ts` keeps each agent's tool calls `chat.ts` turns an agent's transcript and live stream into chat rows, `forecast.ts` holds the limit pace and its chart, `headroom.tsx` the context row and cache warnings, `timeline.ts` the timeline's scale and drawing, `popover.tsx` the details under the bar, `receipt.tsx` the session's ledger, and `notify.ts` the done notification.
+The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar, `task.ts` follows the task list, `feed.ts` keeps each agent's tool calls `chat.ts` turns an agent's transcript and live stream into chat rows, `forecast.ts` holds the limit pace and its chart, `headroom.tsx` the context row and cache warnings, `cache.ts` the Cache module's figures and pictures, `timeline.ts` the timeline's scale and drawing, `popover.tsx` the details under the bar, `receipt.tsx` the session's ledger, and `notify.ts` the done notification.
 
 ## License
 

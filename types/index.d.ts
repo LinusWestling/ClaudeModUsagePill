@@ -137,6 +137,13 @@ export type Popover = 'limits' | 'context' | 'cache' | 'session'
 declare module 'claude-code' {
   interface PluginState {
     'usage-pill': {
+      // ── 0.6.3 ──
+      /** The main thread's requests this session, oldest first, for the Cache module's strip. */
+      cacheLog: Cache[]
+      /** Whether the Context module shows every row, the folded ones too. */
+      contextOpen: boolean
+      /** Whether the five-minute cooling warning is off; kept across sessions in the store. */
+      coolingWarnOff: boolean
       // ── 0.6.0: Agent A (band) ──
       /** The 5-hour window's readings since its last reset, oldest first. */
       limitSamples: LimitSample[]
