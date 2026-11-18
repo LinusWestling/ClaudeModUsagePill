@@ -1,4 +1,5 @@
 import type { AgentRun, AgentStatus, ToolEntry } from '../types'
+import { lockPhase } from './mascot'
 
 /**
  * The Subagents pane's timeline: every agent on one time axis. The geometry is
@@ -173,7 +174,7 @@ export const rowSvg = (
     .map(d => `<circle cx="${Math.min(width - 2, Math.max(2, d.x))}" cy="2" r="1.8" fill="#FF3B47"/>`)
     .join('')
   const style =
-    `.cap{animation:cap 1.6s ease-in-out infinite}` +
+    `.cap{animation:cap 1.6s ease-in-out infinite;${lockPhase(now, 1600)}}` +
     `@keyframes cap{0%,100%{opacity:.15}50%{opacity:.85}}` +
     `@media (prefers-reduced-motion:reduce){.cap{animation:none;opacity:.5}}`
   const mid = BAR_TOP + BAR_HEIGHT / 2

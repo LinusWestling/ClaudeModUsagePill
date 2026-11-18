@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { contextGroups } from '../hooks/popover'
 import { WINDOW_MS, addSample, forecastChartSvg, forecastOf, inWindow, outLabel, span } from '../hooks/forecast'
 
 const NOW = Date.parse('2026-11-17T12:00:00Z')
@@ -102,4 +103,46 @@ test('the chart draws the used line, the dashed pace and the red limit', () => {
 
   expect(plain.includes('class="pace"')).toBe(false)
   expect(plain.includes('class="used"')).toBe(true)
+})
+
+test('the chart reads in local clock times, with the out label and the blocked stretch', () => {
+  const samples = [at(60, 20), at(30, 35), at(0, 50)]
+  const forecast = forecastOf(samples, limit(50), NOW)
+  const svg = forecastChartSvg(samples, forecast, RESETS, 480, 116, false, { now: NOW, percent: 50, zone: 'Europe/Stockholm' })
+
+  // The window runs 09:00 to 14:00 UTC, so 10:00 to 15:00 in Stockholm; now is 13:00.
+  for (const tick of ['10:00', '15:00', '>now<', '>Limit<', '>50%<', '>out ~14:40<']) expect(svg.includes(tick)).toBe(true)
+  expect(svg.includes('−5h')).toBe(false)
+  // The blocked stretch is shaded, and the pace ends in a dot at the limit.
+  expect(svg.includes('fill="#E5534B" fill-opacity=".12"')).toBe(true)
+  expect(svg.includes('class="out"')).toBe(true)
+
+  const calm = forecastOf([at(60, 20), at(0, 30)], limit(30), NOW)
+  const quiet = forecastChartSvg([at(60, 20), at(0, 30)], calm, RESETS, 480, 116, false, { now: NOW, percent: 30, zone: 'Europe/Stockholm' })
+
+  expect(quiet.includes('~50% at reset')).toBe(true)
+  expect(quiet.includes('class="out"')).toBe(false)
+})
+
+test('the chart falls back to −5h and reset where the clock is unknown', () => {
+  const samples = [at(60, 20), at(0, 30)]
+  const svg = forecastChartSvg(samples, undefined, RESETS, 320, 116, false, { now: NOW, percent: 30, zone: 'UTC' })
+
+  expect(svg.includes('>−5h<')).toBe(true)
+  expect(svg.includes('>reset<')).toBe(true)
+})
+
+test('the context groups the conversation apart from what is always loaded', () => {
+  const groups = contextGroups([
+    { name: 'System prompt', tokens: 8_000 },
+    { name: 'Messages', tokens: 120_000 },
+    { name: 'MCP tools', tokens: 30_000 },
+    { name: 'Skills', tokens: 2_000 },
+  ])
+
+  expect(groups.map(g => g.title)).toEqual(['Conversation', 'Always loaded'])
+  expect(groups[0]!.tokens).toBe(120_000)
+  expect(groups[1]!.tokens).toBe(40_000)
+  expect(groups[1]!.rows.map(r => r.name)).toEqual(['MCP tools', 'System prompt', 'Skills'])
+  expect(Math.round(groups[1]!.share * 100)).toBe(25)
 })

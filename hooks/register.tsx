@@ -37,7 +37,7 @@ import {
 } from './chat'
 import { STATUS_GLYPH, duration, feedView, finishTool, settleTools, spinnerFrame, spinnerSvg, startTool } from './feed'
 import { mascotSvg } from './mascot'
-import { forecastOf, loadLimitSamples, outLabel, recordLimit } from './forecast'
+import { forecastOf, loadLimitSamples, localClock, outLabel, recordLimit } from './forecast'
 import {
   COOLING_SHOWN_MS,
   bookCoolingNotice,
@@ -191,6 +191,10 @@ const toModel = (
       percent: limit.percentUsed,
       left: Number.isNaN(remaining) ? undefined : timeLeft(remaining),
       ...(runsOutAt === undefined ? {} : { out: outLabel(runsOutAt, time) }),
+      // Only the 5-hour window shows its reset in the chip, as a bare clock.
+      ...(kind === 'five_hour' && !Number.isNaN(Date.parse(limit.resetsAt ?? '')) && localClock(Date.parse(limit.resetsAt!))
+        ? { reset: localClock(Date.parse(limit.resetsAt!)) }
+        : {}),
     }
   }
 
@@ -270,10 +274,10 @@ const toggle = (keys: readonly string[], key: string): string[] =>
 type Chat = { entries: ChatEntry[] } | { deny: string }
 
 /** A drawing, on a surface that has them: the caller checks it isn't the terminal. */
-const picture = ($: EngineInterface, e: RenderInput, source: string, alt: string, size: number) => {
+const picture = ($: EngineInterface, e: RenderInput, key: string, source: string, alt: string, size: number) => {
   const { Svg } = $.ui.resolve(e as RenderInput & { surface: 'desktop' })
 
-  return <Svg source={source} alt={alt} width={size} height={size} />
+  return <Svg key={key} source={source} alt={alt} width={size} height={size} />
 }
 
 // The chat's agent's messages, read once per change rather than per
@@ -469,10 +473,10 @@ async function chatView($: EngineInterface, e: RenderInput<'Pane'>, id: string) 
       <Box flexDirection="row" columnGap={1} alignItems="center">
         {hasPictures && run ? (
           <Box flexShrink={0}>
-            {picture($, e, mascotSvg(MOOD[status], run.outfit, 28), `${STATUS_WORD[status]} mascot in a ${run.outfit} outfit`, 28)}
+            {picture($, e, `chat-mascot-${run.id}`, mascotSvg(MOOD[status], run.outfit, 28, now), `${STATUS_WORD[status]} mascot in a ${run.outfit} outfit`, 28)}
           </Box>
         ) : null}
-        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Text weight="semibold" wrap="truncate-end">
             {titleOf(run)}
           </Text>
@@ -553,7 +557,7 @@ async function chatView($: EngineInterface, e: RenderInput<'Pane'>, id: string) 
               {cells.category}
             </Text>
           </Box>
-          <Box flexGrow={1} flexShrink={1}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {cells.onPress ? (
               <Button key={key} plain onPress={cells.onPress}>
                 {text}
@@ -700,7 +704,7 @@ async function chatView($: EngineInterface, e: RenderInput<'Pane'>, id: string) 
     return (
       <Box key={`row-${a.key}`} flexDirection="column">
         <Button key={a.key} plain onPress={flip(a.key)}>
-          <Text dimColor size="caption">{`${isNow ? spinnerFrame(beat) : isLineOpen ? '▾' : '▸'} ${text}${time}`}</Text>
+          <Text dimColor size="caption" wrap="truncate-end">{`${isNow ? spinnerFrame(beat) : isLineOpen ? '▾' : '▸'} ${text}${time}`}</Text>
           {summary.failed > 0 ? <Text color="error" size="caption">{` · ${summary.failed} failed`}</Text> : null}
         </Button>
         {isLineOpen ? (
@@ -812,9 +816,14 @@ export const register: Register = (on, options) => {
           $.ui.toast(coolingText(Math.ceil((CACHE_TTL - (time - lastCache.at)) / 60_000), cachedTokens(lastCache)))
         }
       })
-      // The agents' clocks tick by the second, but only while one runs.
+      // The agents' clocks tick by the second, but only while one runs and the
+      // pane that shows them is on screen: nothing else reads the tick.
       $.clock.every(1_000, async () => {
-        if ((await read($, agents)).some(isRunning)) {
+        if (!(await read($, agents)).some(isRunning)) return
+
+        const shown = (await $.ui.panes()).some(p => p.id === PANE && p.isPlaced && p.isShown)
+
+        if (shown) {
           const time = await $.clock.now()
           await update($, agentTick, () => time)
         }
@@ -1188,11 +1197,11 @@ export const register: Register = (on, options) => {
       const columns = Math.ceil(e.props.bodyColumns / 2) * 2
       const fit = (await $.env.get('OS')) === 'Windows_NT' ? WINDOWS : MACOS
       // With the cell given, the chips' dividers land on cell edges, where the buttons can start.
-      const pill = buildPill(model, (columns + 2) * CELL_WIDTH, fit, CELL_WIDTH)
+      const pill = buildPill(model, (columns + 2) * CELL_WIDTH, fit, CELL_WIDTH, time)
       const row = (
         <Box height={1}>
           <Box position="absolute" top={-1} left={-1} right={-1}>
-            <Svg source={pill.source} alt={pill.alt} />
+            <Svg key="pill" source={pill.source} alt={pill.alt} />
           </Box>
           {/* One blank button over each chip the pill drew (pill.ts places them); the
               task chip's keeps its old key. Each draws the native hover highlight. */}
@@ -1211,7 +1220,6 @@ export const register: Register = (on, options) => {
 
       // A chip's module, as wide as the band, its insides less a border and padding.
       const panel = await popoverPanel($, e, (e.props.bodyColumns - 4) * CELL_WIDTH, e.props.bodyColumns - 4)
-
       // The pill reaches a row below its own: what goes under it starts under that.
       return room || panel ? (
         <Box flexDirection="column">
@@ -1329,14 +1337,14 @@ export const register: Register = (on, options) => {
     const mascot = (run: AgentRun, size: number) =>
       hasPictures ? (
         <Box flexShrink={0}>
-          {picture($, e, mascotSvg(MOOD[run.status], run.outfit, size), `${STATUS_WORD[run.status]} mascot in a ${run.outfit} outfit`, size)}
+          {picture($, e, `mascot-${run.id}`, mascotSvg(MOOD[run.status], run.outfit, size, now), `${STATUS_WORD[run.status]} mascot in a ${run.outfit} outfit`, size)}
         </Box>
       ) : null
 
-    const spinner = () =>
+    const spinner = (id: string) =>
       hasPictures ? (
         <Box flexShrink={0} width={2} alignItems="center">
-          {picture($, e, spinnerSvg(12), 'Running', 12)}
+          {picture($, e, `spin-${id}`, spinnerSvg(12, undefined, now), 'Running', 12)}
         </Box>
       ) : (
         <Text color="claude">{spinnerFrame(beat)}</Text>
@@ -1366,13 +1374,13 @@ export const register: Register = (on, options) => {
     const toolRow = (call: ToolEntry, age: number) => (
       <Box key={`call-${call.id}`} flexDirection="row" columnGap={1}>
         {call.status === 'running' ? (
-          spinner()
+          spinner(call.id)
         ) : (
           <Box flexShrink={0} width={2}>
             <Text color={TOOL_COLOR[call.status]}>{STATUS_GLYPH[call.status]}</Text>
           </Box>
         )}
-        <Box flexGrow={1} flexShrink={1}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text
             color={call.status === 'error' ? 'error' : undefined}
             // The two latest read at full strength; what came before fades back.
@@ -1398,7 +1406,7 @@ export const register: Register = (on, options) => {
 
       return doing ? (
         <Box key={`pause-${run.id}`} flexDirection="row" columnGap={1}>
-          {spinner()}
+          {spinner(`pause-${run.id}`)}
           <Text dimColor italic>{`${feed.length === 0 && !run.activity ? 'Starting' : doing}…`}</Text>
         </Box>
       ) : null
@@ -1423,12 +1431,13 @@ export const register: Register = (on, options) => {
           borderStyle="round"
           borderColor={viewing === run.id ? 'suggestion' : 'claude'}
           paddingX={1}
+          overflow="hidden"
         >
           <Box flexDirection="row" columnGap={1}>
             {mascot(run, 40)}
-            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
               <Box flexDirection="row" columnGap={1} justifyContent="space-between">
-                <Box flexShrink={1}>
+                <Box flexShrink={1} minWidth={0}>
                   <Text weight="semibold" wrap="truncate-end">
                     {titleOf(run)}
                   </Text>
@@ -1445,7 +1454,7 @@ export const register: Register = (on, options) => {
               {step ? (
                 <Box flexDirection="row" columnGap={1}>
                   {stepBar ? <Text color="claude">{stepBar}</Text> : null}
-                  <Box flexShrink={1}>
+                  <Box flexShrink={1} minWidth={0}>
                     <Text size="caption" wrap="truncate-end">
                       {step}
                     </Text>
@@ -1468,7 +1477,7 @@ export const register: Register = (on, options) => {
             {pauseRow(run, feed)}
           </Box>
           <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
-            <Box flexShrink={1}>
+            <Box flexShrink={1} minWidth={0}>
               <Text dimColor size="caption" wrap="truncate-end">
                 {progressLine(run, now)}
               </Text>
@@ -1483,9 +1492,9 @@ export const register: Register = (on, options) => {
     const done = (run: AgentRun) => (
       <Box key={`done-${run.id}`} flexDirection="row" columnGap={1}>
         {mascot(run, 24)}
-        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Box flexDirection="row" columnGap={1} justifyContent="space-between">
-            <Box flexShrink={1}>
+            <Box flexShrink={1} minWidth={0}>
               <Text weight="semibold" wrap="truncate-end">
                 {titleOf(run)}
               </Text>
@@ -1502,7 +1511,7 @@ export const register: Register = (on, options) => {
             </Text>
           )}
           <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
-            <Box flexShrink={1}>
+            <Box flexShrink={1} minWidth={0}>
               <Text dimColor size="caption" wrap="truncate-end">
                 {metaLine(run)} · {progressLine(run, now)}
               </Text>
@@ -1547,15 +1556,15 @@ export const register: Register = (on, options) => {
       const scale = scaleOf(listed, now)
       const columns = barColumns(e.props.bodyColumns)
 
-      const drawing = (source: string, alt: string, size?: { width: number; height: number }) => {
+      const drawing = (key: string, source: string, alt: string, size?: { width: number; height: number }) => {
         const { Svg } = $.ui.resolve(e as RenderInput & { surface: 'desktop' })
 
-        return <Svg source={source} alt={alt} {...size} />
+        return <Svg key={key} source={source} alt={alt} {...size} />
       }
 
       // Where the mascot stands in a row, kept empty above it so the axis lines up with the bars.
       const indent = (
-        <Box flexShrink={0}>{drawing('<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"/>', '', { width: 24, height: 12 })}</Box>
+        <Box flexShrink={0}>{drawing('tl-gap', '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="12"/>', '', { width: 24, height: 12 })}</Box>
       )
 
       const row = (run: AgentRun) => {
@@ -1566,9 +1575,9 @@ export const register: Register = (on, options) => {
         return (
           <Box key={`tl-row-${run.id}`} flexDirection="row" columnGap={1}>
             {mascot(run, 24)}
-            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
               <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
-                <Box flexShrink={1}>
+                <Box flexShrink={1} minWidth={0}>
                   <Button key={`tl-${run.id}`} plain label={titleOf(run)} onPress={openChat(run)} />
                 </Box>
                 <Box flexShrink={0} flexDirection="row" columnGap={1}>
@@ -1579,7 +1588,7 @@ export const register: Register = (on, options) => {
                 </Box>
               </Box>
               {hasPictures ? (
-                drawing(rowSvg(run, feed, scale, now), rowAlt(run, feed, now))
+                drawing(`tl-bar-${run.id}`, rowSvg(run, feed, scale, now), rowAlt(run, feed, now))
               ) : (
                 <Box flexDirection="row">
                   <Text>{bar.before}</Text>
@@ -1598,8 +1607,8 @@ export const register: Register = (on, options) => {
           {hasPictures ? (
             <Box flexDirection="row" columnGap={1}>
               {indent}
-              <Box flexGrow={1} flexShrink={1}>
-                {drawing(axis.source, axis.alt)}
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                {drawing('tl-axis', axis.source, axis.alt)}
               </Box>
             </Box>
           ) : (
@@ -1607,7 +1616,7 @@ export const register: Register = (on, options) => {
           )}
           {listed.map(row)}
           <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
-            <Box flexShrink={1}>
+            <Box flexShrink={1} minWidth={0}>
               <Text dimColor size="caption" wrap="wrap">
                 Press a name to open its chat.
               </Text>
@@ -1621,7 +1630,7 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" rowGap={1}>
         <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
-          <Box flexShrink={1}>
+          <Box flexShrink={1} minWidth={0}>
             <Text bold wrap="truncate-end">
               {summary.counts}
             </Text>
