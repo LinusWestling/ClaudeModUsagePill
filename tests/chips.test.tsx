@@ -64,6 +64,8 @@ const CATEGORIES = [
 
 /** The panes the stand-in was asked to close. */
 const closed: string[] = []
+/** What the stand-in's store was asked to keep. */
+const stored: unknown[] = []
 
 const seed = (on: any, values: Record<string, unknown>, opened: { id: string; title?: string }[] = [], usage: Record<string, unknown> = {}) => {
   const held: Record<string, unknown> = {
@@ -73,6 +75,7 @@ const seed = (on: any, values: Record<string, unknown>, opened: { id: string; ti
   let version = 1
 
   closed.length = 0
+  stored.length = 0
 
   on('clock.now', () => ({ value: NOW }))
   on('env.get', () => ({ value: undefined }))
@@ -95,7 +98,11 @@ const seed = (on: any, values: Record<string, unknown>, opened: { id: string; ti
     return { value: undefined }
   })
   on('store.get', () => ({ value: undefined }))
-  on('store.set', () => ({ value: undefined }))
+  on('store.set', (_: unknown, e: { value: unknown }) => {
+    stored.push(e.value)
+
+    return { value: undefined }
+  })
   on('prompt.submit', (_: unknown, e: any) => ({ ...e }))
   on('command.register', () => ({ value: { command: 'x' } }))
   on('session.start', () => ({ cwd: '/repo' }))
@@ -405,7 +412,7 @@ for (const surface of ['desktop', 'terminal'] as const) {
     expect(t).toContain('81%')
     expect(t).toContain('System tools')
     // Ten rows of band: what doesn't fit folds into one row, and Compact now still shows.
-    expect(t).toContain('+ 1 more: System prompt')
+    expect(t).toContain('▾ 1 more: System prompt')
     // The free space fills nothing.
     expect(t.includes('Free space')).toBe(false)
     expect((await ui.find({ key: 'popover-compact' }))?.text).toBe('Compact now')
@@ -421,17 +428,93 @@ for (const surface of ['desktop', 'terminal'] as const) {
     await ui.unmount()
   })
 
-  test(`Cache on the ${surface}: warm with its minutes, what the next message reads, and the hint`, async ($, on) => {
-    seed(on, { reading: READING, cache: CACHE, task: TASK, ledger: { ...NO_LEDGER, main: { input: 10, cacheRead: 990, cacheWrite: 0, output: 5, requests: 3 } } })
+  test(`Context on the ${surface}: the folded row opens every row, and Show less folds them again`, async ($, on) => {
+    seed(on, { reading: READING, cache: CACHE, task: TASK })
+    await press($, surface, 'chip-context')
 
-    const { ui, text } = await open($, surface, 'chip-cache')
-    const t = text
+    let { ui, text } = await look($, surface)
+
+    expect(text.includes('System prompt')).toBe(false)
+    await ui.press({ key: 'context-more-Always loaded' })
+    await ui.unmount()
+    ;({ ui, text } = await look($, surface))
+    expect(text).toContain('System prompt')
+    expect(text).toContain('▴ Show less')
+    expect(text.some(x => x.includes('more:'))).toBe(false)
+    await ui.press({ key: 'context-less' })
+    await ui.unmount()
+    ;({ ui, text } = await look($, surface))
+    expect(text).toContain('▾ 1 more: System prompt')
+
+    // Opened, then closed: it opens folded next time.
+    await ui.press({ key: 'context-more-Always loaded' })
+    await ui.press({ key: 'popover-close' })
+    await ui.unmount()
+    await press($, surface, 'chip-context')
+    ;({ ui, text } = await look($, surface))
+    expect(text).toContain('▾ 1 more: System prompt')
+    await ui.unmount()
+  })
+
+  test(`Cache on the ${surface}: the hour left, what the next message costs warm and cold, and the session`, async ($, on) => {
+    const log = [
+      { read: 0, written: 30_000, uncached: 10, at: NOW - 80 * MIN },
+      { read: 30_000, written: 2_000, uncached: 10, at: NOW - 70 * MIN },
+      { read: 380_000, written: 9_000, uncached: 1_000, at: NOW - 30 * MIN },
+      CACHE,
+    ]
+
+    seed(on, {
+      reading: READING,
+      cache: CACHE,
+      cacheLog: log,
+      task: TASK,
+      ledger: { ...NO_LEDGER, main: { input: 10, cacheRead: 990_000, cacheWrite: 0, output: 5, requests: 4 } },
+    })
+    await press($, surface, 'chip-cache')
+
+    const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: 18 }, surface })
+    const t = (await ui.findAll({ type: 'Text' })).map((x: any) => x.text) as string[]
 
     expect(t).toContain('Cache')
-    expect(t).toContain('Warm · cools in 42m')
-    expect(t).toContain('Next message reads 410k tokens from the cache')
-    expect(t).toContain('Cache hit 99% this session')
-    expect(t).toContain('Cold: the next message re-sends everything at full price')
+    expect(t).toContain('Warm')
+    expect(t.some(x => x.startsWith('· 42m left · cools '))).toBe(true)
+    // A tenth of 410k while warm; twice it once the cache must be written again.
+    expect(t).toContain('Send now')
+    expect(t).toContain('≈ 41k')
+    expect(t).toContain('After it cools')
+    expect(t).toContain('≈ 820k')
+    expect(t).toContain('Last reply 410k')
+    expect(t).toContain(' read 400k')
+    expect(t).toContain(' written 9k')
+    expect(t).toContain('4 replies · hit 100%')
+    expect(t).toContain('≈ 891k')
+    expect(t.some(x => x.startsWith('Cold starts') && x.includes('(start)'))).toBe(true)
+    expect((await ui.find({ key: 'cache-warn' }))?.text).toBe('Warn at 5m: on')
+    expect((await ui.find({ key: 'popover-compact' }))?.text).toBe('Compact now')
+
+    if (surface === 'desktop') {
+      const alts = ((await ui.findAll({ type: 'Svg' })) as any[]).map(s => String(s.props.alt))
+
+      expect(alts).toContain('42 minutes of the cache\'s hour left')
+      expect(alts).toContain('Cache use per reply, 1 cold starts')
+    }
+
+    await ui.unmount()
+  })
+
+  test(`a short band keeps the cost of the next message and drops the rest first on the ${surface}`, async ($, on) => {
+    seed(on, { reading: READING, cache: CACHE, cacheLog: [CACHE], task: TASK, ledger: { ...NO_LEDGER, main: { input: 10, cacheRead: 990, cacheWrite: 0, output: 5, requests: 1 } } })
+
+    await press($, surface, 'chip-cache')
+
+    // Room for the countdown and the cost, not for every section (the terminal's band loses fewer rows).
+    const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, maxRows: surface === 'desktop' ? 14 : 10 }, surface })
+    const text = (await ui.findAll({ type: 'Text' })).map((x: any) => x.text) as string[]
+
+    expect(text).toContain('Send now')
+    expect(text.some(x => x.startsWith('Last reply'))).toBe(false)
+    expect((await ui.find({ key: 'popover-compact' }))?.text).toBe('Compact now')
     await ui.unmount()
   })
 
@@ -442,7 +525,9 @@ for (const surface of ['desktop', 'terminal'] as const) {
     const t = text
 
     expect(t).toContain('Cold')
-    expect(t).toContain('Next message re-reads 410k tokens')
+    expect(t.some(x => x.startsWith('· cooled '))).toBe(true)
+    expect(t).toContain('Your next message re-sends all 410k at full price (≈ 820k)')
+    expect(t.includes('Send now')).toBe(false)
     await ui.unmount()
   })
 }
@@ -512,5 +597,20 @@ test('Context on the desktop highlights the largest row and shows the last turn'
   expect(text).toContain('Read register.tsx ~18k')
   // 120k is over a tenth of the 1M window: amber.
   expect(((await ui.find({ type: 'Text', text: '+120k' })) as any).props.color).toBe('warning')
+  await ui.unmount()
+})
+
+test('the warning switch turns the five-minute warning off and remembers it', async ($, on) => {
+  seed(on, { reading: READING, cache: CACHE, task: TASK })
+  await press($, 'desktop', 'chip-cache')
+
+  let ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+  await ui.press({ key: 'cache-warn' })
+  await ui.unmount()
+  for (let i = 0; i < 50 && stored.length === 0; i++) await new Promise(r => (globalThis as any).setTimeout(r, 1))
+  ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect((await ui.find({ key: 'cache-warn' }))?.text).toBe('Warn at 5m: off')
+  expect(stored).toContain(true)
   await ui.unmount()
 })

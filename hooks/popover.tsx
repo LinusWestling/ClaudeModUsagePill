@@ -5,11 +5,13 @@ import type { Ledger, Popover } from '../types'
 import { compact, elapsed } from './agents'
 import { forecastChartSvg, forecastOf, localClock, outLabel, span } from './forecast'
 import {
-  cacheStatusLabel,
+  CACHE_TTL_MS,
+  COOLING_NOTICE_MS,
+  bookCoolingNotice,
   cacheStatusOf,
+  cancelCoolingNotice,
   compactNow,
   deltaLabel,
-  nextMessageLabel,
   SEGMENT,
   segmentColor,
   terminalBar,
@@ -17,6 +19,7 @@ import {
   windowBarSvg,
 } from './headroom'
 import { NO_LEDGER, RECEIPT_PANE, barSvg, blockBar, cacheHit, shares, usedSince } from './receipt'
+import { CACHE_COLORS, countdownSvg, inputOf, isColdStart, nextCost, savedOf, splitBarSvg, stripSvg, stripText } from './cache'
 
 // ── The popover under the pill ──────────────────────────────────────────────
 // One module at a time, drawn as rows of the band right under the pill: Limits
@@ -30,6 +33,39 @@ const ledger = atom({ plugin: 'usage-pill', key: 'ledger' } as const, NO_LEDGER)
 const cache = atom({ plugin: 'usage-pill', key: 'cache' } as const, null)
 const limitSamples = atom({ plugin: 'usage-pill', key: 'limitSamples' } as const, [])
 const headroom = atom({ plugin: 'usage-pill', key: 'headroom' } as const, null)
+const contextOpen = atom({ plugin: 'usage-pill', key: 'contextOpen' } as const, false)
+const cacheLog = atom({ plugin: 'usage-pill', key: 'cacheLog' } as const, [])
+const coolingWarnOff = atom({ plugin: 'usage-pill', key: 'coolingWarnOff' } as const, false)
+
+/** Where the store keeps whether the cooling warning is off, across sessions. */
+const WARN_KEY = 'coolingWarnOff'
+
+/** At session start: the cooling warning as it was last left. */
+export async function loadCoolingWarn($: EngineInterface) {
+  const stored = await $.store.get(WARN_KEY)
+
+  if (stored === true) await update($, coolingWarnOff, () => true)
+}
+
+/** Turns the five-minute cooling warning off or back on, and books or takes back its notification. */
+export async function toggleCoolingWarn($: EngineInterface) {
+  const isOff = !(await read($, coolingWarnOff))
+
+  await update($, coolingWarnOff, () => isOff)
+  await $.store.set(WARN_KEY, isOff).catch(() => undefined)
+
+  if (isOff) {
+    await cancelCoolingNotice($)
+
+    return
+  }
+
+  const last = await read($, cache)
+
+  if (last?.at !== undefined && last.read + last.written > 0) {
+    await bookCoolingNotice($, inputOf(last), CACHE_TTL_MS, (await $.clock.now()) - last.at)
+  }
+}
 
 /** Shows `kind`, in place of whatever was open. */
 export async function openPopover($: EngineInterface, kind: Popover) {
@@ -39,10 +75,17 @@ export async function openPopover($: EngineInterface, kind: Popover) {
 /** Shows `kind`, or closes it when it is the one open: a chip's press. */
 export async function togglePopover($: EngineInterface, kind: Popover) {
   await update($, popover, open => (open === kind ? null : kind))
+  if ((await read($, popover)) === null) await foldContext($)
 }
 
 export async function closePopover($: EngineInterface) {
   if ((await read($, popover)) !== null) await update($, popover, () => null)
+  await foldContext($)
+}
+
+/** The Context module opens folded again next time. */
+async function foldContext($: EngineInterface) {
+  if (await read($, contextOpen)) await update($, contextOpen, () => false)
 }
 
 const TITLE: Record<Popover, string> = { limits: 'Session limit', context: 'Context', cache: 'Cache', session: 'Session' }
@@ -112,6 +155,7 @@ const ALWAYS_TOP = 7
  */
 export const contextGroups = <C extends { name: string; tokens: number; color?: string }>(
   categories: readonly C[],
+  top = ALWAYS_TOP,
 ): ContextGroup[] => {
   const sorted = [...categories].filter(c => c.tokens > 0).sort((a, b) => b.tokens - a.tokens)
   const total = sorted.reduce((n, c) => n + c.tokens, 0)
@@ -126,11 +170,11 @@ export const contextGroups = <C extends { name: string; tokens: number; color?: 
   const conversation = all.filter(r => isConversation(r.name))
   let always = all.filter(r => !isConversation(r.name))
 
-  if (always.length > ALWAYS_TOP + 1) {
-    const rest = always.slice(ALWAYS_TOP)
+  if (always.length > top + 1) {
+    const rest = always.slice(top)
     const tokens = rest.reduce((n, r) => n + r.tokens, 0)
 
-    always = [...always.slice(0, ALWAYS_TOP), { name: 'Other', tokens, index: ALWAYS_TOP, share: total > 0 ? tokens / total : 0 }]
+    always = [...always.slice(0, top), { name: 'Other', tokens, index: top, share: total > 0 ? tokens / total : 0 }]
   }
 
   const groups: ContextGroup[] = [
@@ -328,7 +372,9 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
     const used = usedCategories(
       (usage.context.breakdown?.categories ?? []).map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind, color: c.color })),
     )
-    const groups = contextGroups(used)
+    const isOpen = (await read($, contextOpen)) === true
+    // Opened, every category has its row; folded, the smallest share one.
+    const groups = contextGroups(used, isOpen ? Infinity : undefined)
     const usedTotal = used.reduce((n, c) => n + c.tokens, 0)
     const shown = tokens ?? usedTotal
     const share = window <= 0 || shown <= 0 ? undefined : (shown / window) * 100
@@ -367,7 +413,7 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
     const fitted = groups.map(g => ({ ...g, rows: [...g.rows], folded: [] as ContextRow[] }))
     const rowCount = () => fitted.reduce((n, g) => n + g.rows.length + (g.folded.length > 0 ? 1 : 0), 0)
 
-    while (rowCount() > budget) {
+    while (!isOpen && rowCount() > budget) {
       // Fold from the group with the most rows; never its last one.
       const g = [...fitted].sort((a, b) => b.rows.length - a.rows.length)[0]
 
@@ -430,9 +476,11 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
         {g.folded.length === 0 ? null : (
           <Box key={`context-more-${g.title}`} flexDirection="row" columnGap={1} paddingX={1}>
             <Box flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text dimColor size="caption" wrap="truncate-end">
-                {`+ ${g.folded.length} more: ${g.folded.map(r => r.name).join(', ')}`}
-              </Text>
+              <Button key={`context-more-${g.title}`} plain onPress={() => void update($, contextOpen, () => true)}>
+                <Text dimColor size="caption" wrap="truncate-end">
+                  {`▾ ${g.folded.length} more: ${g.folded.map(r => r.name).join(', ')}`}
+                </Text>
+              </Button>
             </Box>
             <Box flexShrink={0} width={BAR_COLUMNS} />
             {figures(
@@ -481,6 +529,15 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
             </Box>
           ),
       ...groupRows,
+      isOpen ? (
+        <Box key="context-less" paddingX={1}>
+          <Button key="context-less" plain onPress={() => void update($, contextOpen, () => false)}>
+            <Text dimColor size="caption">
+              ▴ Show less
+            </Text>
+          </Button>
+        </Box>
+      ) : null,
       <Box key="context-footer" flexDirection="row" columnGap={2} justifyContent="space-between" alignItems="center" marginTop={1}>
         <Box flexShrink={1} flexDirection="row" columnGap={1}>
           {lastDelta === undefined ? null : (
@@ -508,25 +565,197 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
   } else if (kind === 'cache') {
     const status = lastCache ? cacheStatusOf(lastCache, now) : undefined
     const hit = cacheHit(l.main)
+    const log = (await read($, cacheLog)) ?? []
+    const isWarnOff = (await read($, coolingWarnOff)) === true
+    const cost = lastCache ? nextCost(lastCache) : undefined
+    const cooledAt = lastCache?.at === undefined ? undefined : lastCache.at + CACHE_TTL_MS
+    const clockOf = (at: number) => localClock(at) ?? `${span(Math.abs(at - now))}`
+    const isCooling = status?.isWarm === true && status.coolsIn !== undefined && status.coolsIn <= 10
+    const colds = log.filter(isColdStart)
+    // Bars sit between a label and a figure, about nine pixels a cell.
+    const LABEL_COLUMNS = 14
+    const FIGURE_COLUMNS = 8
+    const rowBarPx = Math.max(40, Math.round(width - (LABEL_COLUMNS + FIGURE_COLUMNS + 4) * 9))
+    const fullPx = Math.max(40, Math.round(width))
+
+    /** A label, a bar to scale, a figure: one row of the cost comparison. */
+    const costRow = (key: string, label: string, fraction: number, color: string, figure: string, isDim: boolean) => (
+      <Box key={key} flexDirection="row" columnGap={1} alignItems="center">
+        <Box flexShrink={0} width={LABEL_COLUMNS}>
+          <Text dimColor={isDim} wrap="truncate-end">
+            {label}
+          </Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1}>
+          {hasPictures ? (
+            picture(`${key}-bar`, barSvg(fraction, color, rowBarPx, 6), `${label} ${figure}`, rowBarPx, 6)
+          ) : (
+            <Text color={isDim ? 'warning' : 'success'}>{blockBar(fraction, Math.max(8, columns - LABEL_COLUMNS - FIGURE_COLUMNS - 4))}</Text>
+          )}
+        </Box>
+        <Box flexShrink={0} width={FIGURE_COLUMNS} justifyContent="flex-end">
+          <Text tabular dimColor={isDim}>
+            {figure}
+          </Text>
+        </Box>
+      </Box>
+    )
+
+    const sections: { key: string; rows: number; rank: number; node: unknown }[] = []
+
+    if (status?.isWarm && lastCache?.at !== undefined) {
+      const left = Math.max(0, CACHE_TTL_MS - (now - lastCache.at)) / CACHE_TTL_MS
+
+      sections.push({
+        key: 'countdown',
+        rows: 1,
+        rank: 0,
+        node: (
+          <Box key="cache-countdown">
+            {hasPictures ? (
+              picture(
+                'cache-countdown-svg',
+                countdownSvg(left, COOLING_NOTICE_MS / CACHE_TTL_MS, isCooling ? CACHE_COLORS.cooling : CACHE_COLORS.warm, fullPx, 8),
+                `${status.coolsIn ?? 60} minutes of the cache's hour left`,
+                fullPx,
+                8,
+              )
+            ) : (
+              <Text color={isCooling ? 'warning' : 'success'}>{blockBar(left, Math.max(8, columns - 2))}</Text>
+            )}
+          </Box>
+        ),
+      })
+    }
+
+    if (cost && status) {
+      sections.push(
+        status.isWarm
+          ? {
+              key: 'next',
+              rows: 3,
+              rank: 1,
+              node: (
+                <Box key="cache-next" flexDirection="column" marginTop={1}>
+                  {costRow('cache-next-warm', 'Send now', cost.warm / Math.max(1, cost.cold), CACHE_COLORS.read, `≈ ${compact(cost.warm)}`, false)}
+                  {costRow('cache-next-cold', 'After it cools', 1, CACHE_COLORS.miss, `≈ ${compact(cost.cold)}`, true)}
+                </Box>
+              ),
+            }
+          : {
+              key: 'next',
+              rows: 2,
+              rank: 1,
+              node: (
+                <Box key="cache-next" flexDirection="column" marginTop={1}>
+                  <Text key="cache-next-cold" color="warning" wrap="truncate-end">
+                    {`Your next message re-sends all ${compact(cost.tokens)} at full price (≈ ${compact(cost.cold)})`}
+                  </Text>
+                </Box>
+              ),
+            },
+      )
+    }
+
+    if (lastCache && inputOf(lastCache) > 0) {
+      const parts = [
+        { name: 'read', tokens: lastCache.read, color: CACHE_COLORS.read },
+        { name: 'written', tokens: lastCache.written, color: CACHE_COLORS.written },
+        { name: 'uncached', tokens: lastCache.uncached, color: CACHE_COLORS.uncached },
+      ]
+
+      sections.push({
+        key: 'last',
+        rows: hasPictures ? 3 : 2,
+        rank: 3,
+        node: (
+          <Box key="cache-last" flexDirection="column" marginTop={1}>
+            {hasPictures ? picture('cache-last-svg', splitBarSvg(parts, fullPx, 6), parts.map(p => `${p.name} ${compact(p.tokens)}`).join(', '), fullPx, 6) : null}
+            <Box flexDirection="row" columnGap={2}>
+              <Text dimColor>{`Last reply ${compact(inputOf(lastCache))}`}</Text>
+              {parts.map(p => (
+                <Text key={`cache-last-${p.name}`} wrap="truncate-end">
+                  <Text color={hasPictures ? p.color : p.name === 'read' ? 'success' : p.name === 'written' ? 'warning' : 'subtle'}>●</Text>
+                  <Text dimColor>{` ${p.name} ${compact(p.tokens)}`}</Text>
+                </Text>
+              ))}
+            </Box>
+          </Box>
+        ),
+      })
+    }
+
+    if (hit !== undefined) {
+      const coldText =
+        colds.length === 0 ? '' : ` (${colds.slice(-2).map(c => (c === log[0] ? 'start' : c.at === undefined ? '?' : clockOf(c.at))).join(', ')})`
+
+      sections.push({
+        key: 'session',
+        rows: log.length > 0 ? 3 : 2,
+        rank: 2,
+        node: (
+          <Box key="cache-session" flexDirection="column" marginTop={1}>
+            {log.length === 0
+              ? null
+              : hasPictures
+                ? picture('cache-strip-svg', stripSvg(log, fullPx, 14), `Cache use per reply, ${colds.length} cold starts`, fullPx, 14)
+                : <Text key="cache-strip-text">{stripText(log, Math.max(8, columns - 2))}</Text>}
+            <Box flexDirection="row" columnGap={2} justifyContent="space-between">
+              <Text dimColor>
+                {`${l.main.requests} ${l.main.requests === 1 ? 'reply' : 'replies'} · hit `}
+                <Text tabular>{percent(hit)}</Text>
+              </Text>
+              <Text dimColor>
+                Saved <Text tabular>{`≈ ${compact(savedOf(l.main))}`}</Text>
+              </Text>
+              <Text dimColor wrap="truncate-end">
+                Cold starts <Text tabular>{`${colds.length}`}</Text>
+                {coldText}
+              </Text>
+            </Box>
+          </Box>
+        ),
+      })
+    }
+
+    // The band holds so many rows: the least telling sections go first, the footer stays.
+    const fixed = 1 + 2
+    let budget = Math.max(0, rowsLeft - fixed)
+    const kept = new Set<string>()
+
+    for (const s of [...sections].sort((a, b) => a.rank - b.rank)) {
+      if (s.rows <= budget) {
+        kept.add(s.key)
+        budget -= s.rows
+      }
+    }
 
     rows = [
       heading(
-        status === undefined ? 'No request yet' : cacheStatusLabel(status),
-        status === undefined ? undefined : !status.isWarm || (status.coolsIn !== undefined && status.coolsIn <= 10) ? 'warning' : undefined,
+        status === undefined ? 'No request yet' : status.isWarm ? 'Warm' : 'Cold',
+        status === undefined ? undefined : !status.isWarm || isCooling ? 'warning' : undefined,
+        status === undefined
+          ? undefined
+          : status.isWarm
+            ? status.coolsIn === undefined
+              ? undefined
+              : `· ${status.coolsIn}m left${cooledAt === undefined ? '' : ` · cools ${clockOf(cooledAt)}`}`
+            : cooledAt === undefined
+              ? undefined
+              : `· cooled ${clockOf(cooledAt)}`,
       ),
-      lastCache && status ? (
-        <Text key="cache-next" wrap="truncate-end">
-          {nextMessageLabel(lastCache, status.isWarm)}
-        </Text>
-      ) : null,
-      hit === undefined ? null : (
-        <Text key="cache-hit" wrap="truncate-end">
-          {`Cache hit ${percent(hit)} this session`}
-        </Text>
-      ),
-      <Text key="cache-cold" dimColor size="caption" wrap="truncate-end">
-        Cold: the next message re-sends everything at full price
-      </Text>,
+      ...sections.filter(s => kept.has(s.key)).map(s => s.node),
+      <Box key="cache-footer" flexDirection="row" columnGap={2} justifyContent="space-between" alignItems="center" marginTop={1}>
+        <Box flexShrink={1}>
+          <Text dimColor size="caption" wrap="truncate-end">
+            {status?.isWarm === false ? 'Compact first so the cold start re-sends less' : 'Long break ahead? Compact first'}
+          </Text>
+        </Box>
+        <Box flexDirection="row" columnGap={1} flexShrink={0}>
+          <Button key="cache-warn" plain label={`Warn at 5m: ${isWarnOff ? 'off' : 'on'}`} onPress={() => void toggleCoolingWarn($)} />
+          <Button key="popover-compact" label="Compact now" onPress={() => void compactNow($)} />
+        </Box>
+      </Box>,
     ]
   } else {
     const agentCount = Object.keys(l.agents).length

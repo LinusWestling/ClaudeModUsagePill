@@ -375,12 +375,13 @@ let notices: Promise<unknown> = Promise.resolve()
  * drops it if the person comes back first, so it only reaches someone away. A
  * terminal raises any notification at once, so only an app's surface gets one.
  */
-export function bookCoolingNotice($: EngineInterface, tokens: number, ttl: number): Promise<unknown> {
+export function bookCoolingNotice($: EngineInterface, tokens: number, ttl: number, elapsed = 0): Promise<unknown> {
   notices = notices
     .then(async () => {
       const surfaces = await $.session.surfaces()
+      const delayMs = ttl - COOLING_NOTICE_MS - elapsed
 
-      if (surfaces.length === 0 || surfaces.includes('terminal')) return
+      if (surfaces.length === 0 || surfaces.includes('terminal') || delayMs <= 0) return
 
       // Sent again under its key it would replace the last one; taken back first all
       // the same, so no host keeps two. A failed cancel still books the new one, and
@@ -392,12 +393,19 @@ export function bookCoolingNotice($: EngineInterface, tokens: number, ttl: numbe
       }
       await $.ui.notify(coolingText(COOLING_NOTICE_MS / 60_000, tokens), {
         key: NOTIFY_KEY,
-        delayMs: ttl - COOLING_NOTICE_MS,
+        delayMs,
         untilBack: true,
         title: 'Cache cooling',
       })
     })
     .catch(() => undefined)
+
+  return notices
+}
+
+/** Takes back the booked cooling notification: the warning was turned off. */
+export function cancelCoolingNotice($: EngineInterface): Promise<unknown> {
+  notices = notices.then(() => $.ui.cancelNotify(NOTIFY_KEY)).catch(() => undefined)
 
   return notices
 }

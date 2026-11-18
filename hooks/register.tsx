@@ -54,7 +54,8 @@ import {
 import { MACOS, WINDOWS, buildPill, chipButtons } from './pill'
 import { registerNotify } from './notify'
 import { registerReceipt } from './receipt'
-import { popoverPanel, registerPopover, togglePopover } from './popover'
+import { loadCoolingWarn, popoverPanel, registerPopover, togglePopover } from './popover'
+import { appendLog } from './cache'
 import type { ChipKind, PillModel } from './pill'
 import { NO_TASK, PLAN_TOOL, WRAP_UP_TOOL, applyPlan, finishPlan, viewTask } from './task'
 import {
@@ -93,6 +94,8 @@ const celebrateUntil = atom({ plugin: 'usage-pill', key: 'celebrateUntil' } as c
 // Written in forecast.ts and headroom.tsx; read here, where the scan needs them declared.
 const limitSamples = atom({ plugin: 'usage-pill', key: 'limitSamples' } as const, [])
 const headroom = atom({ plugin: 'usage-pill', key: 'headroom' } as const, null)
+const cacheLog = atom({ plugin: 'usage-pill', key: 'cacheLog' } as const, [])
+const coolingWarnOff = atom({ plugin: 'usage-pill', key: 'coolingWarnOff' } as const, false)
 /** How long the mascot celebrates a finished task list. */
 const CELEBRATE_MS = 8_000
 
@@ -834,6 +837,8 @@ export const register: Register = (on, options) => {
 
     // The 5-hour window spans sessions: take up the pace the store kept of it.
     await loadLimitSamples($, usage.rateLimits)
+    // So is the choice of the cooling warning.
+    await loadCoolingWarn($).catch(() => undefined)
 
     // Keeps the reset of the limits honest while nothing else redraws the pill.
     if (!isTicking) {
@@ -844,7 +849,11 @@ export const register: Register = (on, options) => {
 
         const lastCache = await read($, cache)
 
-        if (coolingToast(lastCache, await read($, working), time, CACHE_TTL) && lastCache?.at !== undefined) {
+        if (
+          coolingToast(lastCache, await read($, working), time, CACHE_TTL) &&
+          lastCache?.at !== undefined &&
+          !(await read($, coolingWarnOff))
+        ) {
           $.ui.toast(coolingText(Math.ceil((CACHE_TTL - (time - lastCache.at)) / 60_000), cachedTokens(lastCache)))
         }
       })
@@ -1063,10 +1072,11 @@ export const register: Register = (on, options) => {
         const used = toCache(result.usage, at)
 
         await update($, cache, () => used)
+        await update($, cacheLog, log => appendLog(log ?? [], used))
         await refresh($)
 
         // Booked for five minutes before it goes cold, for someone who has left.
-        if (used.read + used.written > 0) {
+        if (used.read + used.written > 0 && !(await read($, coolingWarnOff))) {
           await bookCoolingNotice($, cachedTokens(used), CACHE_TTL)
         }
       }
