@@ -179,54 +179,41 @@ test('the limits group reads 23% strong, the week and the reset dim, and a pace 
   expect(out.includes('wk<') || out.includes('↻')).toBe(false)
 })
 
-/** The class a drawn group's wash and the border carry. */
-const washes = (source: string) => [...source.matchAll(/class="(wash-(?:amber|red))"/g)].map(m => m[1])
 const frame = (source: string) => /class="(frame[^"]*)"/.exec(source)![1]
 
-test('a warning tints only the group at risk, and the border to match its worst', () => {
+test('a warning colours only the bar and the figure at risk; the border only at red', () => {
   const ok = buildPill(FULL, 1_200, MACOS, CELL)
 
-  expect(washes(ok.source)).toEqual([])
-  expect(frame(ok.source)).toBe('frame')
   // Calm: a plain hairline, no gradient, and bars of the neutral fill.
+  expect(frame(ok.source)).toBe('frame')
   expect(ok.source.includes('linearGradient')).toBe(false)
   expect(/class="(amber|red)"/.test(ok.source)).toBe(false)
+  // No group is ever washed.
+  expect(ok.source.includes('wash-')).toBe(false)
 
-  const at = (pill: ReturnType<typeof buildPill>, kind: string) => pill.chips.find(c => c.kind === kind)!
-  const washAt = (pill: ReturnType<typeof buildPill>) =>
-    [...pill.source.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="\d+" rx="8" class="(wash-[a-z]+)"/g)].map(m => ({ x: Number(m[1]), width: Number(m[2]), cls: m[3] }))
+  // The week at 75%: its bar and its own figure turn amber, the session's percent, the
+  // clock and the border do not.
+  const warn = buildPill({ ...FULL, session: { percent: 23.5, reset: '14:14' }, week: 75 }, 1_200, MACOS, CELL)
 
-  // A limit at 75% washes the limits group, amber, and no other.
-  const warn = buildPill({ ...FULL, week: 75 }, 1_200, MACOS, CELL)
-  const limits = at(warn, 'session')
-
-  expect(washAt(warn)).toEqual([{ x: Number(limits.x.toFixed(1)), width: Number(limits.width.toFixed(1)), cls: 'wash-amber' }])
-  expect(frame(warn.source)).toBe('frame edge-amber')
-  expect(warn.source.includes('class="value t-amber"')).toBe(true)
+  expect(frame(warn.source)).toBe('frame')
+  expect(warn.source.includes('wash-')).toBe(false)
   expect(/class="amber"/.test(warn.source)).toBe(true)
+  expect(/class="dim t-amber"[^>]*>· 75% wk</.test(warn.source)).toBe(true)
+  expect(/class="value"[^>]*>24%</.test(warn.source)).toBe(true)
+  expect(/class="dim"[^>]*>↻ /.test(warn.source)).toBe(true)
 
-  // A session running out is a warning whatever its figure.
+  // A session running out is a warning whatever its figure: its percent and the time.
   const out = buildPill({ ...FULL, session: { percent: 40, out: 'out ~16:40' } }, 1_200, MACOS, CELL)
 
-  expect(washes(out.source)).toEqual(['wash-amber'])
+  expect(/class="value t-amber"[^>]*>40%</.test(out.source)).toBe(true)
+  expect(/class="dim t-amber"[^>]*>· out ~16:40</.test(out.source)).toBe(true)
 
-  // Past 90% it is red, in the context group's case too, spanning both its chips.
+  // Past 90% the context's figure is red, its word stays dim, and the border turns red.
   const hot = buildPill({ ...FULL, context: { percent: 93, label: '186k / 200k' } }, 1_200, MACOS, CELL)
-  const [wash] = washAt(hot)
-  const context = at(hot, 'context')
-  const cache = at(hot, 'cache')
 
-  expect(washAt(hot)).toHaveLength(1)
-  expect(wash!.cls).toBe('wash-red')
-  expect(wash!.x).toBe(Number(context.x.toFixed(1)))
-  expect(Math.abs(wash!.x + wash!.width - (cache.x + cache.width)) < 0.1).toBe(true)
+  expect(/class="value t-red"[^>]*>186k</.test(hot.source)).toBe(true)
+  expect(/class="dim"[^>]*>ctx</.test(hot.source)).toBe(true)
   expect(frame(hot.source)).toBe('frame edge-red')
-
-  // The worst group sets the border.
-  const both = buildPill({ ...FULL, week: 75, context: { percent: 95, label: '190k / 200k' } }, 1_200, MACOS, CELL)
-
-  expect(washes(both.source)).toEqual(['wash-amber', 'wash-red'])
-  expect(frame(both.source)).toBe('frame edge-red')
 })
 
 test('a cooling cache tints only its own word and dot', () => {
@@ -235,7 +222,7 @@ test('a cooling cache tints only its own word and dot', () => {
   expect(pill.source.includes('>cools 4m<')).toBe(true)
   expect(/<text[^>]*class="label t-amber"[^>]*>cools 4m</.test(pill.source)).toBe(true)
   expect(/<circle [^>]*class="amber"/.test(pill.source)).toBe(true)
-  expect(washes(pill.source)).toEqual([])
+  expect(pill.source.includes('wash-')).toBe(false)
   expect(frame(pill.source)).toBe('frame')
   expect((pill.source.match(/t-amber"/g) ?? []).length).toBe(1)
 })
@@ -251,8 +238,8 @@ test('both colour schemes are in the drawing: dark by default, light under the m
   expect(light!.includes('.value{fill:#141417}')).toBe(true)
   expect(dark!.includes('.dim{fill:#9A9AA3')).toBe(true)
   expect(light!.includes('.dim{fill:#5F5F68}')).toBe(true)
-  // Amber and red redefined for text and wash, and the hairlines and border.
-  for (const rule of ['.t-amber{', '.t-red{', '.wash-amber{', '.wash-red{', '.divider{', '.track{', '.frame{', '.edge-amber{', '.dot-warm{']) {
+  // Amber and red redefined for text, and the hairlines and border.
+  for (const rule of ['.t-amber{', '.t-red{', '.divider{', '.track{', '.frame{', '.edge-red{', '.dot-warm{']) {
     expect(dark!.includes(rule)).toBe(true)
     expect(light!.includes(rule)).toBe(true)
   }
