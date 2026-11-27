@@ -524,10 +524,13 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 
   if (lastChip) lastChip.segEnd = size - rowRight - 1
   const height = above + ROW
-  // Drawn larger than its slot by `oversize`, the image is always scaled down to
-  // fill it exactly: the drawing's units are then the band's cells, at any cell size.
+  // Drawn wider than its slot by `oversize`, the image is always narrowed to fill
+  // it exactly, so the drawing's units across are the band's cells at any cell
+  // size. Only across: the caller fixes its height in pixels (the Svg's `height`),
+  // and `preserveAspectRatio="none"` lets it stretch across alone, so a screen
+  // with wider cells never makes it taller than the band and cuts off its foot.
   const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(size * oversize)}" height="${Math.round(height * oversize)}" viewBox="0 0 ${size} ${height}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(size * oversize)}" height="${height}" viewBox="0 0 ${size} ${height}"${oversize === 1 ? '' : ' preserveAspectRatio="none"'}>` +
     `<style>${style}</style><defs>${defs}</defs>${body}</svg>`
 
   const parts = [
@@ -582,8 +585,13 @@ export const HOVER_CLEAR = 2
  */
 export const BUTTON_BASE = 21
 export const SPACE_WIDTH = 3.64
-/** The share of its chip's area a Button is sized to: the rest is slack for another screen's font. */
-export const BUTTON_FILL = 0.88
+/**
+ * The share of its chip's area a Button is sized to. A Button in a Box with no
+ * width can't be shrunk into an ellipsis, so it is sized to the whole area: where
+ * a screen's font is wider than measured, it reaches a little into the half cell
+ * kept clear of the divider, which is what that room is for.
+ */
+export const BUTTON_FILL = 1
 
 /** The no-break spaces of a chip's Button: as wide as BUTTON_FILL of its `cells`, at least one. */
 export const fitSpaces = (cells: number, cell: number) =>
