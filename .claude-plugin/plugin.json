@@ -1,6 +1,6 @@
 {
   "name": "usage-pill",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "A usage bar above the prompt: task progress, session and weekly limits, context tokens, warm or cold prompt cache",
   "types": "./types/index.d.ts",
   "author": {
@@ -21,10 +21,16 @@
       "default": 2,
       "min": 0
     },
+    "showHeadroom": {
+      "type": "boolean",
+      "title": "Show the context headroom row",
+      "description": "Open a row under the bar by itself once the context is past the point below: what fills it, what the last turn added, and Compact now. The same is always in the Context panel",
+      "default": false
+    },
     "headroomAt": {
       "type": "number",
       "title": "Context headroom row from (%)",
-      "description": "When the context is at least this full, a second row under the bar shows what fills it, what the last turn added, and a Compact now button",
+      "description": "When the headroom row is on, it opens from this context percentage",
       "default": 80,
       "min": 1,
       "max": 100

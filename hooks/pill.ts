@@ -47,9 +47,9 @@ const CORNER = 12
 const SIZE = 11.5
 /** The space kept around each section, inside the one border. */
 const INSET = 4
-const CHIP_PAD = 12
+const CHIP_PAD = 14
 /** The padding of the context and cache chips, which sit side by side in one group. */
-const PAIR_PAD = 10
+const PAIR_PAD = 14
 /** The mascot in the task chip, and what it takes from the chip's text. */
 // Twice the grid: anything but a whole multiple smears its pixels.
 const MASCOT_SIZE = 32
@@ -300,7 +300,7 @@ const snapToCells = (chips: readonly { natural: number; least: number }[], start
   return widths
 }
 
-const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, now = 0) => {
+const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, now = 0, oversize = 1) => {
   const { above, left: rowLeft, right: rowRight } = fit
   const mid = above + ROW / 2
   const text = (x: number, content: string, cls: string): string =>
@@ -515,8 +515,10 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 
   if (lastChip) lastChip.segEnd = size - rowRight - 1
   const height = above + ROW
+  // Drawn larger than its slot by `oversize`, the image is always scaled down to
+  // fill it exactly: the drawing's units are then the band's cells, at any cell size.
   const source =
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${height}" viewBox="0 0 ${size} ${height}">` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(size * oversize)}" height="${Math.round(height * oversize)}" viewBox="0 0 ${size} ${height}">` +
     `<style>${style}</style><defs>${defs}</defs>${body}</svg>`
 
   const parts = [
@@ -537,7 +539,7 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 }
 
 /** Fills `width`, giving up words before figures, and whole chips only as a last resort, when it is narrow. */
-export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cell?: number, now = 0) => {
+export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cell?: number, now = 0, oversize = 1) => {
   const m: PillModel = given.task ? given : { ...given, task: IDLE_TASK }
   const shown = (d: Detail): PillModel => ({
     ...m,
@@ -545,7 +547,7 @@ export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cel
     context: d.context ? m.context : undefined,
   })
   const stage = STAGES.find(d => neededWidth(shown(d), d) <= width - fit.left) ?? STAGES[STAGES.length - 1]!
-  const drawn = draw(shown(stage), stage, width, fit, cell, now)
+  const drawn = draw(shown(stage), stage, width, fit, cell, now, oversize)
 
   // The alt text says what there is: no task is no task, whatever the chip shows.
   return m.task === IDLE_TASK ? { ...drawn, alt: drawn.alt.replace(/^Task: Ready(, )?/, '') } : drawn
@@ -554,24 +556,28 @@ export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cel
 
 // ── The hover areas over the chips ──────────────────────────────────────────
 // The desktop band places a Box only in whole cells, and a Button has no width
-// of its own: a plain one is as wide as its label, in a font whose width differs
-// from screen to screen. So the hover area is a Box measured in cells, laid out
-// as a column, which stretches the Button inside it across its whole width: the
-// native highlight is then the area exactly, whatever the font or the display.
-// The Button's label of no-break spaces is kept short enough never to fill the
-// area, as the app shrinks a Button too wide for its place and draws an ellipsis
-// in it. With the dividers on cell middles (snapToCells), every area keeps the
-// same half cell clear of them.
+// of its own: a plain one is as wide as its label, and the app neither stretches
+// it nor lets it overflow (it shrinks it and draws an ellipsis). So each chip's
+// hover area is a Box of whole cells with a Button of no-break spaces centred in
+// it, sized to nine tenths of the area by the measured widths below. Where the
+// screen's font differs from the measure, the highlight is a little shorter or
+// longer, but evenly so at both ends, and never so long that it fills the area.
 
 /** The least room kept between a hover area and the border or a divider, in the drawing's pixels. */
 export const HOVER_CLEAR = 2
 
 /**
- * The no-break spaces of a hover area's Button: well inside its `cells`. A
- * desktop Button is about 21px of padding and 3.64px a space; this counts 28px
- * and 4.2px, so a cell up to a tenth smaller than measured still leaves room.
+ * A plain Button's width on the macOS desktop, for a label of `n` no-break
+ * spaces: BUTTON_BASE + n * SPACE_WIDTH pixels, measured on a hover screenshot (0.6.1).
  */
-export const fitSpaces = (cells: number, cell: number) => Math.max(1, Math.floor((cells * cell - 28) / 4.2))
+export const BUTTON_BASE = 21
+export const SPACE_WIDTH = 3.64
+/** The share of its area a Button is sized to: the rest is slack for another screen's font. */
+export const BUTTON_FILL = 0.9
+
+/** The no-break spaces of a hover area's Button: as wide as BUTTON_FILL of its `cells`, at least one. */
+export const fitSpaces = (cells: number, cell: number) =>
+  Math.max(1, Math.floor((cells * cell * BUTTON_FILL - BUTTON_BASE) / SPACE_WIDTH))
 
 /** One hover area over a chip: its left edge and its width in band cells. */
 export type ChipButton = { kind: ChipKind; left: number; cells: number }

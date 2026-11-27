@@ -101,10 +101,17 @@ const coolingWarnOff = atom({ plugin: 'usage-pill', key: 'coolingWarnOff' } as c
 const CELEBRATE_MS = 8_000
 
 
-// A cell of the desktop's band, in pixels, measured from a screenshot. A little
-// high on purpose: a drawing too wide is scaled down to fit, one too narrow leaves
-// a gap.
+// A cell of the desktop's band, in pixels, measured from a screenshot on one
+// screen. Other screens' cells differ: the pill is drawn in these units and
+// scaled to its slot (OVERSIZE), and the panels' drawings sized by it.
 const CELL_WIDTH = 8.77
+
+/**
+ * How much larger than its slot the pill is drawn. The app scales a drawing too
+ * wide down to fit and leaves one too narrow short, so drawn larger than any cell
+ * could make it, it always fills the row exactly, its cells on the band's.
+ */
+const OVERSIZE = 1.5
 
 // How long the prompt cache holds an entry after its last use. The API doesn't say
 // which applies; an hour is what this account's requests have used, and it falls to
@@ -244,8 +251,8 @@ const scrollToEnd = ($: EngineInterface) =>
 
 /**
  * A chip button's label is made of these, as it lies over a chip the pill draws
- * beneath it: no-break spaces, which no surface collapses. Fewer than fill its
- * hover area, which stretches it to its cells (`chipButtons` in pill.ts).
+ * beneath it: no-break spaces, which no surface collapses. Their count sizes it
+ * to its hover area (`fitSpaces` in pill.ts).
  */
 const BLANK = '\u00a0'
 
@@ -813,6 +820,8 @@ export const register: Register = (on, options) => {
   let isTicking = false
   // The context percentage from which the band shows its headroom row.
   const headroomAt = headroomAtOf(options)
+  // The row under the bar opens by itself only for someone who asked for it.
+  const showsHeadroom = options?.showHeadroom === true
   // The Agent call says the effort asked for; its spawn doesn't.
   const askedEffort = new Map<string, string>()
   // Also runs on a reload, so the pill shows without waiting for a response.
@@ -1232,25 +1241,25 @@ export const register: Register = (on, options) => {
     const time = await $.clock.now()
     const model = toModel(now, lastCache, currentTask, time, e.props.isWorking, runs, samples, celebrating > time)
     // Past the threshold, a second row under the pill; under it, the band as it was.
-    const room = headroomViewOf(now, measured, headroomAt)
+    const room = showsHeadroom ? headroomViewOf(now, measured, headroomAt) : null
 
     if (e.surface === 'desktop') {
       const { Box, Button, Svg, Text } = $.ui.resolve(e)
-      // Two cells wider and taller than the row's body, to reach over the app's own
-      // padding, which is one cell on each side: the border lands on the rectangle.
-      // The body flips between neighbouring widths while the row doesn't: use the even one.
-      const columns = Math.ceil(e.props.bodyColumns / 2) * 2
+      // Two cells wider than the row's body, to reach over the app's own padding,
+      // which is one cell on each side: the border lands on the rectangle. The
+      // drawing is scaled to its slot (OVERSIZE), so its cells are the band's.
+      const columns = e.props.bodyColumns
       const fit = (await $.env.get('OS')) === 'Windows_NT' ? WINDOWS : MACOS
       // With the cell given, the chips' dividers land on cell edges, where the buttons can start.
-      const pill = buildPill(model, (columns + 2) * CELL_WIDTH, fit, CELL_WIDTH, time)
+      const pill = buildPill(model, (columns + 2) * CELL_WIDTH, fit, CELL_WIDTH, time, OVERSIZE)
       const row = (
         <Box height={1}>
           <Box position="absolute" top={-1} left={-1} right={-1}>
             <Svg key="pill" source={pill.source} alt={pill.alt} />
           </Box>
           {/* One hover area over each chip the pill drew, whole cells wide (pill.ts
-              places them): a column, so the blank button in it stretches across it and
-              its native highlight is exactly the area. The task chip's keeps its old key. */}
+              places them), with a blank button sized to it and centred, so its native
+              highlight keeps the same gap at both ends. The task chip's keeps its old key. */}
           {chipButtons(pill.chips, CELL_WIDTH).map(b => (
             <Box
               key={`hit-${b.kind}`}
@@ -1258,8 +1267,8 @@ export const register: Register = (on, options) => {
               top={0}
               left={b.left}
               width={b.cells}
-              flexDirection="column"
-              alignItems="stretch"
+              flexDirection="row"
+              justifyContent="center"
             >
               <Button
                 key={b.kind === 'task' ? 'agents' : `chip-${b.kind}`}

@@ -32,7 +32,7 @@ With under 10 minutes of warm cache left, the cache chip reads `Cools 4m` in amb
 
 ## Context headroom
 
-From 80% context, a second row appears under the bar. Set the point with `headroomAt`. The row shows:
+Switch on `showHeadroom` and, from 80% context, a second row appears under the bar on its own. Set the point with `headroomAt`. It is off by default: the same figures are always in the Context panel. The row shows:
 
 - `86% context`, in amber, and in red from 90%.
 - A small bar of what fills the context, by the categories `/context` uses.
@@ -68,7 +68,8 @@ Set these in the plugin's config.
 
 | Setting | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `headroomAt` | number | 80 | Context percent where the headroom row appears. |
+| `showHeadroom` | boolean | false | Open the headroom row under the bar by itself past `headroomAt`. |
+| `headroomAt` | number | 80 | Context percent where the headroom row appears, when it is on. |
 | `notifyOnDone` | boolean | true | Notify when a long turn finishes. |
 | `notifyAfterMinutes` | number | 2 | How long a turn must take to notify. |
 
@@ -126,10 +127,10 @@ The diff is built from the edits themselves, reading the file just before each o
 
 ## Known limits
 
-- **Tuned by eye for one setup.** The app doesn't let a mod style its rectangle above the prompt, so the bar is drawn over it, using pixel measurements taken from screenshots of the macOS and Windows desktop apps. It may sit a pixel or two off at other window widths, or further off on Linux and other app versions. To adjust it, change `MACOS` or `WINDOWS` in `hooks/pill.ts`, and `CELL_WIDTH` in `hooks/register.tsx`.
+- **Tuned by eye for one setup.** The app doesn't let a mod style its rectangle above the prompt, so the bar is drawn over it, using pixel measurements taken from screenshots of the macOS and Windows desktop apps. The drawing is made larger than its slot, which the app always scales down to fit, so it fills the row on any screen and its sections line up with the band's cells. Where the row sits inside the drawing may still be a pixel or two off on Linux and other app versions. To adjust it, change `MACOS` or `WINDOWS` in `hooks/pill.ts`.
 - **Warm and cold are an estimate.** Claude Code doesn't report the cache's state, so the mod counts one hour from the last request. If your requests use the five-minute lifetime, for example on extra usage, it can say `Warm` after the cache has gone cold.
 - **The task bar depends on the desktop app.** It reads the desktop app's task-list tool, so other surfaces show the sweeping bar instead.
-- **Also tuned by eye.** The headroom row, the details under the bar, the timeline and the limit chart were tuned by eye on macOS dark mode. Each chip's hover area is laid in whole cells, so it keeps the same gap from the dividers on any screen, and where it sits follows the same measured cell width as the bar.
+- **Also tuned by eye.** The headroom row, the details under the bar, the timeline and the limit chart were tuned by eye on macOS dark mode. A mod can't size a button: a desktop button is as wide as its label. So each chip's button is a label of blank spaces sized from a measured font width to nine tenths of the chip and centred in it. On a screen whose font differs, the highlight is a little shorter or longer, the same at both ends.
 - **Light mode follows the page.** The bar and charts are images, which can't read the app's theme. They take the page's light or dark preference instead. Where the two differ the bar keeps its dark background and stays readable; the charts in the details may read faintly.
 - **Some notifications depend on the desktop app.** The delayed and away-only ones need it. A Claude Code older than 2.1.325 can't cancel a booked one.
 - **The largest tool result is an estimate.** It is the result's characters divided by 4.
