@@ -187,7 +187,7 @@ test('a terminal, which would raise it at once, gets no notification', async ($,
 
 // ── Context headroom ──
 
-test('past the threshold the band gets a headroom row, on every surface', async ($, on) => {
+test('past the threshold the band gets a headroom row, on every surface', { options: { showHeadroom: true } }, async ($, on) => {
   seed(on, { reading: reading(172_000), headroom: HEADROOM })
 
   for (const surface of SURFACES) {
@@ -211,6 +211,15 @@ test('past the threshold the band gets a headroom row, on every surface', async 
   }
 })
 
+test('past the threshold the row stays shut unless asked for', async ($, on) => {
+  seed(on, { reading: reading(190_000), headroom: HEADROOM })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await ui.find({ key: 'compact-now' })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /% context/ })).toBe(undefined)
+  await ui.unmount()
+})
+
 test('under the threshold the band is one row, as before', async ($, on) => {
   seed(on, { reading: reading(150_000), headroom: HEADROOM })
 
@@ -228,7 +237,7 @@ test('under the threshold the band is one row, as before', async ($, on) => {
   }
 })
 
-test('the threshold is the headroomAt option', { options: { headroomAt: 90 } }, async ($, on) => {
+test('the threshold is the headroomAt option', { options: { showHeadroom: true, headroomAt: 90 } }, async ($, on) => {
   seed(on, { reading: reading(172_000), headroom: HEADROOM })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
@@ -236,7 +245,7 @@ test('the threshold is the headroomAt option', { options: { headroomAt: 90 } }, 
   await ui.unmount()
 })
 
-test('past the threshold before a turn has measured it, the row still offers to compact', async ($, on) => {
+test('past the threshold before a turn has measured it, the row still offers to compact', { options: { showHeadroom: true } }, async ($, on) => {
   seed(on, { reading: reading(190_000) })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -246,7 +255,7 @@ test('past the threshold before a turn has measured it, the row still offers to 
   await ui.unmount()
 })
 
-test('Compact now compacts and says how it went', async ($, on) => {
+test('Compact now compacts and says how it went', { options: { showHeadroom: true } }, async ($, on) => {
   const toasts: string[] = []
 
   seed(on, { reading: reading(172_000), headroom: HEADROOM })

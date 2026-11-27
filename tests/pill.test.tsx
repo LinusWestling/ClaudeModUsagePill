@@ -101,7 +101,9 @@ test('the drawing takes the whole row, inside one border', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
-  expect(svg.props.source.includes('width="895"')).toBe(true)
+  // Drawn in the band's cells, and half again as large, so the app scales it to fill the row exactly.
+  expect(svg.props.source.includes('viewBox="0 0 895 ')).toBe(true)
+  expect(svg.props.source.includes('width="1343"')).toBe(true)
   // One plain neutral border, with no gradient.
   expect(svg.props.source.match(/class="frame"/g)?.length).toBe(1)
   expect(svg.props.source.includes('url(#edge)')).toBe(false)
@@ -200,7 +202,7 @@ test('on Windows the border lands on the row, which starts lower in the drawing'
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
   expect(source.includes('<rect class="frame" x="0.5" y="17.5"')).toBe(true)
-  expect(source.includes(' height="57" ')).toBe(true)
+  expect(source.includes(' height="86" viewBox="0 0 895 57"')).toBe(true)
   await ui.unmount()
 })
 
@@ -211,6 +213,6 @@ test('elsewhere it keeps the macOS measurements', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
   expect(source.includes('<rect class="frame" x="2" y="10.5"')).toBe(true)
-  expect(source.includes(' height="50" ')).toBe(true)
+  expect(source.includes(' height="75" viewBox="0 0 895 50"')).toBe(true)
   await ui.unmount()
 })
