@@ -72,17 +72,17 @@ test('a pace that runs out before the reset names the time in the session chip, 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
 
-  // The chip shows the reset as a bare clock, with no words; the run-out is in the alt text.
-  expect(/>\d\d:\d\d</.test(svg.props.source)).toBe(true)
-  expect(svg.props.source.includes('>out')).toBe(false)
-  expect(svg.props.source.includes('>session<')).toBe(false)
+  // The limits group says when it runs out, in place of the week and the clock, and is washed amber.
+  expect(/>· out ~\d\d:\d\d</.test(svg.props.source) || />· out in 1h 40m</.test(svg.props.source)).toBe(true)
+  expect(/>↻/.test(svg.props.source)).toBe(false)
   // Amber, though 50% alone would be calm.
-  expect(svg.props.source.includes('stop-color="#FFB02E"')).toBe(true)
+  expect(svg.props.source.includes('class="wash-amber"')).toBe(true)
+  expect(svg.props.source.includes('class="frame edge-amber"')).toBe(true)
   expect(/at this pace runs out (~\d\d:\d\d|in 1h 40m)/.test(svg.props.alt)).toBe(true)
   await ui.unmount()
 
   const text = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(/^50% session · out /.test((await text.find({ type: 'Text', text: /session/ }))?.text ?? '')).toBe(true)
+  expect(/^50% · out /.test((await text.find({ type: 'Text', text: /out/ }))?.text ?? '')).toBe(true)
   await text.unmount()
 })
 
@@ -90,11 +90,12 @@ test('with too few samples the chip stays calm', async ($, on) => {
   seed(on, { reading: reading(40_000, 50), limitSamples: [{ at: NOW, percent: 50 }] })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  // No pace: no amber, and the dim word is still the reset's clock (or `session` with no zone).
+  // No pace: no wash, and the reset's clock is drawn.
   const source = await svgSource(ui)
 
-  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
-  expect(source.includes('stop-color="#FFB02E"')).toBe(false)
+  expect(/>↻ \d\d:\d\d</.test(source)).toBe(true)
+  expect(source.includes('wash-amber"')).toBe(false)
+  expect(source.includes('class="frame"')).toBe(true)
   await ui.unmount()
 })
 
@@ -105,7 +106,7 @@ test('a warm cache with under ten minutes left counts down, amber', async ($, on
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
-  expect(svg.props.source.includes('>Cools 4m<')).toBe(true)
+  expect(svg.props.source.includes('>cools 4m<')).toBe(true)
   expect(svg.props.alt.includes('prompt cache warm, cools in 4m')).toBe(true)
   await ui.unmount()
 
@@ -119,8 +120,8 @@ test('with more than ten minutes left it is plainly warm', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source = await svgSource(ui)
-  expect(source.includes('>Warm<')).toBe(true)
-  expect(source.includes('Cools')).toBe(false)
+  expect(source.includes('>warm<')).toBe(true)
+  expect(source.includes('cools')).toBe(false)
   await ui.unmount()
 })
 

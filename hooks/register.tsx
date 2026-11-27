@@ -51,7 +51,8 @@ import {
   noteToolResult,
   startTurn,
 } from './headroom'
-import { MACOS, WINDOWS, buildPill, chipButtons } from './pill'
+import { MACOS, WINDOWS, buildPill, chipButtons, overflowSpaces } from './pill'
+import { filesSection, registerFiles } from './files'
 import { registerNotify } from './notify'
 import { registerReceipt } from './receipt'
 import { loadCoolingWarn, popoverPanel, registerPopover, togglePopover } from './popover'
@@ -243,8 +244,8 @@ const scrollToEnd = ($: EngineInterface) =>
 
 /**
  * A chip button's label is made of these, as it lies over a chip the pill draws
- * beneath it: no-break spaces, which no surface collapses. Their count sets the
- * button's width and its hover highlight's (`chipButtons` in pill.ts).
+ * beneath it: no-break spaces, which no surface collapses. Always more than fit:
+ * the hover area around it clips it to its cells (`chipButtons` in pill.ts).
  */
 const BLANK = '\u00a0'
 
@@ -252,7 +253,7 @@ const BLANK = '\u00a0'
  * What a press on each chip of the band opens: the task chip the Subagents pane,
  * the others their module of the popover under the pill (popover.tsx), or close it.
  */
-const CHIP_POPOVER = { session: 'limits', week: 'limits', context: 'context', cache: 'cache' } as const
+const CHIP_POPOVER = { session: 'limits', context: 'context', cache: 'cache' } as const
 
 const pressChip = ($: EngineInterface, kind: ChipKind) =>
   kind === 'task' ? void openPane($) : void togglePopover($, CHIP_POPOVER[kind])
@@ -1245,14 +1246,24 @@ export const register: Register = (on, options) => {
           <Box position="absolute" top={-1} left={-1} right={-1}>
             <Svg key="pill" source={pill.source} alt={pill.alt} />
           </Box>
-          {/* One blank button over each chip the pill drew (pill.ts places them); the
-              task chip's keeps its old key. Each draws the native hover highlight. */}
+          {/* One hover area over each chip the pill drew, whole cells wide (pill.ts
+              places them): a blank button, centred and too wide, clipped to the area,
+              so its native highlight is exactly the area. The task chip's keeps its old key. */}
           {chipButtons(pill.chips, CELL_WIDTH).map(b => (
-            <Box key={`hit-${b.kind}`} position="absolute" top={0} left={b.left}>
+            <Box
+              key={`hit-${b.kind}`}
+              position="absolute"
+              top={0}
+              left={b.left}
+              width={b.cells}
+              overflow="hidden"
+              flexDirection="row"
+              justifyContent="center"
+            >
               <Button
                 key={b.kind === 'task' ? 'agents' : `chip-${b.kind}`}
                 plain
-                label={BLANK.repeat(b.spaces)}
+                label={BLANK.repeat(overflowSpaces(b.cells))}
                 onPress={() => pressChip($, b.kind)}
               />
             </Box>
@@ -1284,7 +1295,17 @@ export const register: Register = (on, options) => {
     const stepBar = steps
       ?.map(s => (s.status === 'completed' ? '▰' : '▱'))
       .join('')
-    const sessionTone = model.session?.out ? (tone(model.session.percent) ?? 'warning') : tone(model.session?.percent ?? 0)
+    // Session and week are one figure, as in the pill: the worse of the two sets its colour.
+    const limitsPercent = Math.max(model.session?.percent ?? 0, model.week ?? 0)
+    const sessionTone = model.session?.out ? (tone(limitsPercent) ?? 'warning') : tone(limitsPercent)
+    const limitsText = model.session
+      ? `${Math.round(model.session.percent)}%` +
+        (model.session.out
+          ? ` · ${model.session.out}`
+          : model.week === undefined
+            ? ' session'
+            : ` · ${Math.round(model.week)}% wk`)
+      : `${Math.round(model.week ?? 0)}% wk`
     const cools = model.cache?.isWarm ? model.cache.coolsIn : undefined
 
     const line = (
@@ -1300,20 +1321,13 @@ export const register: Register = (on, options) => {
           </Box>
         ) : null}
         {/* Each figure is a plain Button around its own coloured text: a press opens its module. */}
-        {model.session ? (
+        {model.session || model.week !== undefined ? (
           <Button key="chip-session" plain onPress={() => pressChip($, 'session')}>
             <Text color={sessionTone} dimColor={sessionTone === undefined}>
-              {`${Math.round(model.session.percent)}% session${model.session.out ? ` · ${model.session.out}` : ''}`}
+              {limitsText}
             </Text>
           </Button>
         ) : null}
-        {model.week === undefined ? null : (
-          <Button key="chip-week" plain onPress={() => pressChip($, 'week')}>
-            <Text color={tone(model.week)} dimColor={tone(model.week) === undefined}>
-              {`${Math.round(model.week)}% week`}
-            </Text>
-          </Button>
-        )}
         {model.context ? (
           <Button key="chip-context" plain onPress={() => pressChip($, 'context')}>
             <Text
@@ -1672,6 +1686,9 @@ export const register: Register = (on, options) => {
       )
     }
 
+    // The files edited this session, under either view; none while none has been.
+    const changed = await filesSection($, e)
+
     return (
       <Box flexDirection="column" rowGap={1}>
         <Box flexDirection="row" columnGap={1} justifyContent="space-between" alignItems="center">
@@ -1692,11 +1709,13 @@ export const register: Register = (on, options) => {
           </Box>
         ) : null}
         {mode === 'timeline' ? null : finished.map(done)}
+        {changed}
       </Box>
     )
   })
 
   registerReceipt(on, options)
   registerPopover(on)
+  registerFiles(on)
   registerNotify(on, options)
 }

@@ -134,9 +134,45 @@ export type Ledger = {
 /** A module of the popover under the pill: Limits, Context and Cache from their chips, Session from /receipt. */
 export type Popover = 'limits' | 'context' | 'cache' | 'session'
 
+/** One stretch of a file's diff: its lines each led by a space (kept), `+` (added) or `-` (removed). */
+export type Hunk = {
+  /** The line the hunk starts at in the file before the edit, and after it. */
+  oldStart: number
+  newStart: number
+  lines: string[]
+  /** The agent id that made it; null for the main loop. */
+  by: string | null
+}
+
+/** What one editor, the main loop (null) or an agent, did to a file. */
+export type Editor = { by: string | null; edits: number; added: number; removed: number }
+
+/** A file edited this session, with its diff, for the Changed files section of the Subagents pane. */
+export type ChangedFile = {
+  /** Absolute. */
+  path: string
+  /** A is a Write to a file that wasn't there; a file can't be told to be deleted, so there is no D. */
+  status: 'M' | 'A'
+  added: number
+  removed: number
+  edits: number
+  editors: Editor[]
+  /** Newest edit first, within one edit by line. */
+  hunks: Hunk[]
+  /** Diff lines dropped to keep a file's diff within its cap. */
+  cut: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'usage-pill': {
+      // ── 0.7.0: Changed files ──
+      /** Every file an Edit, MultiEdit, Write or NotebookEdit changed this session, the latest edit first. */
+      changedFiles: Shaped<ChangedFile[]>
+      /** The rows of the Changed files section opened to their diff (a path), and their folded hunks opened (`more:` and the path). */
+      filesOpen: string[]
+      /** Whose files the section lists: `all`, `you`, or an agent id. */
+      filesFilter: string
       // ── 0.6.3 ──
       /** The main thread's requests this session, oldest first, for the Cache module's strip. */
       cacheLog: Cache[]

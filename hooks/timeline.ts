@@ -1,5 +1,6 @@
 import type { AgentRun, AgentStatus, ToolEntry } from '../types'
 import { lockPhase } from './mascot'
+import { inLight } from './scheme'
 
 /**
  * The Subagents pane's timeline: every agent on one time axis. The geometry is
@@ -203,7 +204,7 @@ export const axisSvg = (scale: Scale, width = TIMELINE_WIDTH): { source: string;
       return `<text x="${n(m.x)}" y="9.5" text-anchor="${anchor}">${m.label}</text>`
     })
     .join('')
-  const style = `text{font:500 10px ${FONT};fill:#8A8A93;font-variant-numeric:tabular-nums}`
+  const style = `text{font:500 10px ${FONT};fill:#8A8A93;font-variant-numeric:tabular-nums}` + inLight('text{fill:#5F5F68}')
 
   return {
     source: open(width, AXIS_HEIGHT, style) + text + `</svg>`,

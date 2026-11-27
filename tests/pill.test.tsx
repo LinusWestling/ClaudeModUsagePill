@@ -49,19 +49,19 @@ const TASK = {
   ],
 }
 
-test('the band draws the task bar with its steps, and every figure as a ring', async ($, on) => {
+test('the band draws the task bar with its steps, and the limits, context and cache figures', async ($, on) => {
   seed(on, { reading: READING, cache: CACHE, task: TASK, isWorking: true })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
   const source: string = svg.props.source
 
-  for (const words of ['Working', '1/3', '24%', '41%', 'week', '48k / 200k', 'Warm', 'cache']) {
+  for (const words of ['Working', '1/3', '24%', '· 41% wk', '48k', 'ctx', 'warm']) {
     expect(source.includes(`>${words}<`)).toBe(true)
   }
 
-  // The chip's dim word is the reset's clock, or `session` where the zone is unknown.
-  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
+  // The session's reset is drawn as a clock after a `↻`.
+  expect(/>↻ \d\d:\d\d</.test(source)).toBe(true)
   expect(source.includes('class="pulse"')).toBe(true)
   expect(svg.props.alt.includes('session 24% used, 2h 14m left')).toBe(true)
   await ui.unmount()
@@ -102,8 +102,9 @@ test('the drawing takes the whole row, inside one border', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const svg: any = await ui.find({ type: 'Svg' })
   expect(svg.props.source.includes('width="895"')).toBe(true)
-  expect(svg.props.source.includes('stroke="url(#edge)"')).toBe(true)
-  expect(svg.props.source.match(/stroke="url\(#edge\)"/g)?.length).toBe(1)
+  // One plain neutral border, with no gradient.
+  expect(svg.props.source.match(/class="frame"/g)?.length).toBe(1)
+  expect(svg.props.source.includes('url(#edge)')).toBe(false)
   await ui.unmount()
 })
 
@@ -121,7 +122,7 @@ test('the cache goes cold once its hour has passed', async ($, on) => {
   seed(on, { reading: READING, cache: { ...CACHE, at: NOW - 61 * 60_000 } })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(((await ui.find({ type: 'Svg' })) as any).props.source.includes('>Cold<')).toBe(true)
+  expect(((await ui.find({ type: 'Svg' })) as any).props.source.includes('>cold<')).toBe(true)
   await ui.unmount()
 })
 
@@ -129,11 +130,11 @@ test('a request that missed and wrote nothing reads as cold', async ($, on) => {
   seed(on, { reading: READING, cache: { read: 0, written: 0, uncached: 50, at: NOW } })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(((await ui.find({ type: 'Svg' })) as any).props.source.includes('>Cold<')).toBe(true)
+  expect(((await ui.find({ type: 'Svg' })) as any).props.source.includes('>cold<')).toBe(true)
   await ui.unmount()
 })
 
-test('a narrow window gives up the weekly figure before the session', async ($, on) => {
+test('a narrow window gives up its words before any figure', async ($, on) => {
   seed(on, { reading: READING, cache: CACHE, task: TASK })
 
   const ui = await $.ui.mount({
@@ -142,8 +143,9 @@ test('a narrow window gives up the weekly figure before the session', async ($, 
     surface: 'desktop',
   })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
-  expect(source.includes('>week<')).toBe(false)
-  expect(/>(session|\d\d:\d\d)</.test(source)).toBe(true)
+  expect(source.includes('wk<')).toBe(false)
+  expect(source.includes('↻')).toBe(false)
+  for (const figure of ['24%', '48k']) expect(source.includes(`>${figure}<`)).toBe(true)
   await ui.unmount()
 })
 
@@ -152,7 +154,7 @@ test('the terminal draws the same in text', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /▰/ }))?.text).toBe('▰▱▱')
-  expect((await ui.find({ type: 'Text', text: /session/ }))?.text).toBe('24% session')
+  expect((await ui.find({ type: 'Text', text: /wk/ }))?.text).toBe('24% · 41% wk')
   await ui.unmount()
 })
 
@@ -197,7 +199,7 @@ test('on Windows the border lands on the row, which starts lower in the drawing'
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
-  expect(source.includes('<rect x="0.5" y="17.5"')).toBe(true)
+  expect(source.includes('<rect class="frame" x="0.5" y="17.5"')).toBe(true)
   expect(source.includes(' height="57" ')).toBe(true)
   await ui.unmount()
 })
@@ -208,7 +210,7 @@ test('elsewhere it keeps the macOS measurements', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const source: string = ((await ui.find({ type: 'Svg' })) as any).props.source
-  expect(source.includes('<rect x="2" y="10.5"')).toBe(true)
+  expect(source.includes('<rect class="frame" x="2" y="10.5"')).toBe(true)
   expect(source.includes(' height="50" ')).toBe(true)
   await ui.unmount()
 })
