@@ -81,10 +81,9 @@ type Level = 0 | 1 | 2
 const levelOf = (percent: number): Level => (percent >= 90 ? 2 : percent >= 70 ? 1 : 0)
 const worse = (...levels: Level[]) => Math.max(...levels) as Level
 
-/** The classes a level gives: a bar's fill, text, a group's wash and the border. */
+/** The classes a level gives: a bar's fill, its figure's text, and the border (red only). */
 const FILL = ['fill', 'amber', 'red'] as const
 const TONE = ['', ' t-amber', ' t-red'] as const
-const WASH = ['', 'wash-amber', 'wash-red'] as const
 const EDGE = ['', ' edge-amber', ' edge-red'] as const
 
 /** Measured advances of the system font at weight 600, in em. */
@@ -156,7 +155,7 @@ type Limits = {
   /** The figure's dim tail: the week or when the session runs out. */
   dim?: string
   clock?: string
-  /** The group's level: its wash and text. */
+  /** The worse of the two limits. */
   level: Level
   hasWeekBar: boolean
   /** The bars' length. */
@@ -318,7 +317,6 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 
   let body = ''
   let defs = ''
-  let washes = ''
   let x = rowLeft + INSET
   // What was drawn where, for the buttons laid over the chips.
   const chipsDrawn: ChipExtent[] = []
@@ -342,7 +340,7 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     )
   }
 
-  // Where each group begins and ends, for its wash and the hairline before it.
+  // Where each group begins and ends, for the hairline before it.
   const groups: { first: ChipKind; level: Level; from: number; to: number }[] = []
 
   chips.forEach((chip, index) => {
@@ -406,8 +404,11 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     }
 
     if (chip.kind === 'session' && limits) {
-      const tone = TONE[limits.level]
       const { session, week } = limits
+      // Only the figure at risk takes the colour, with its own bar: the session's
+      // percent, or the week's after it (or the run-out time, which is the session's).
+      const strongTone = TONE[session ? session.level : (week?.level ?? 0)]
+      const dimTone = session ? TONE[m.session?.out ? session.level : (week?.level ?? 0)] : ''
       const hasWeekBar = limits.hasWeekBar && week !== undefined
       const stacked = session !== undefined && hasWeekBar
 
@@ -420,16 +421,16 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
       }
 
       at += limits.bar + 8
-      body += text(at, limits.strong, `value${tone}`)
+      body += text(at, limits.strong, `value${strongTone}`)
       at += widthOf(limits.strong, true)
 
       if (limits.dim) {
-        body += text(at + 4, limits.dim, `dim${tone}`)
+        body += text(at + 4, limits.dim, `dim${dimTone}`)
         at += 4 + widthOf(limits.dim)
       }
 
       if (limits.clock) {
-        body += text(at + 10, limits.clock, `dim${tone}`)
+        body += text(at + 10, limits.clock, 'dim')
       }
     }
 
@@ -442,7 +443,7 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
       at += widthOf(context.figure, true)
 
       if (context.word) {
-        body += text(at + 4, context.word, `dim${tone}`)
+        body += text(at + 4, context.word, 'dim')
       }
     }
 
@@ -468,13 +469,10 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     x += w + GAP
   })
 
-  // A hairline between groups, and a wash only on one at risk.
+  // A hairline between groups. A warning is told by its bar and its figure alone:
+  // no wash behind the group, which crowded the row.
   groups.forEach((g, i) => {
     if (i > 0) body += divider(g.from - GAP)
-
-    if (g.level > 0) {
-      washes += `<rect x="${g.from.toFixed(1)}" y="${above + 4}" width="${(g.to - g.from).toFixed(1)}" height="${ROW - 8}" rx="8" class="${WASH[g.level]}"/>`
-    }
   })
 
   const style =
@@ -486,7 +484,6 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     `.label{fill:#E8E8EC}.value{fill:#F7F7F8;font-weight:600}.dim{fill:#9A9AA3;font-weight:450}` +
     `.fill{fill:#C4C4CC}.done,.pulse,.sweep{fill:#FF7A59}.amber{fill:#FFB02E}.red{fill:#FF5C5C}` +
     `.dot-warm{fill:#4CC38A}.dot-cold{fill:#5AA9FF}` +
-    `.wash-amber{fill:rgba(255,176,46,.13)}.wash-red{fill:rgba(255,77,77,.15)}` +
     `.t-amber{fill:#FFB02E}.t-red{fill:#FF8A8A}.edge-amber{stroke:rgba(255,176,46,.85)}.edge-red{stroke:rgba(255,77,77,.85)}` +
     // On a light panel: near-black figures, a dim that still clears 4.5:1, darker hairlines,
     // and amber and red deep enough for text.
@@ -496,7 +493,6 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
         `.label{fill:#2E2E33}.value{fill:#141417}.dim{fill:#5F5F68}` +
         `.fill{fill:#5F5F68}.done,.pulse,.sweep{fill:#D9482B}.amber{fill:#C77800}.red{fill:#D12B2B}` +
         `.dot-warm{fill:#1E8E5A}.dot-cold{fill:#2F6FD6}` +
-        `.wash-amber{fill:rgba(199,120,0,.12)}.wash-red{fill:rgba(209,43,43,.1)}` +
         `.t-amber{fill:#8A5300}.t-red{fill:#B3261E}.edge-amber{stroke:rgba(199,120,0,.85)}.edge-red{stroke:rgba(209,43,43,.85)}`,
     ) +
     `.sweep{animation:sweep 1.8s cubic-bezier(.45,0,.55,1) infinite;${lockPhase(now, 1800)}}` +
@@ -509,12 +505,11 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
   const size = Math.ceil(width)
 
   // One neutral border around everything: this is what makes the row read as one unit.
-  // The worst group tints it, so a warning shows from the edge too.
-  const edge = worse(limits?.level ?? 0, context?.level ?? 0)
+  // Only a limit at 90% or more, about to stop work, tints it red; amber stays inside.
+  const edge: Level = worse(limits?.level ?? 0, context?.level ?? 0) === 2 ? 2 : 0
 
   body =
     `<rect class="frame${EDGE[edge]}" x="${rowLeft + 0.5}" y="${above + 0.5}" width="${size - rowLeft - rowRight - 1}" height="${ROW - 1}" rx="${CORNER}"/>` +
-    washes +
     body
   const lastChip = chipsDrawn[chipsDrawn.length - 1]
 

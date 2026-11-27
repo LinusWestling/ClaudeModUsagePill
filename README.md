@@ -16,7 +16,7 @@ The bar has three groups.
 | **Limits** | Two stacked bars, the 5-hour session limit on top and the weekly one below, then `23% · 41% wk` and the session's reset as a clock time, like `↻ 14:14`. When you are on pace to run out before the reset it reads `78% · out ~16:40`. |
 | **Context and cache** | A short bar of the context window with the tokens in it, like `48k ctx`, then a dot and `warm` or `cold`, or `cools 4m` when the cache is about to go cold. The two halves open different details. |
 
-When calm the border is a plain hairline. Limits and context turn amber at 70% and red at 90%: only the group at risk gets a tint, and the border takes its colour. A cooling cache tints only its own word and dot. On a narrow window words go before figures: first the reset clock and `wk`, then the task's label and the `ctx` and cache words, then the week bar, and only then the cache and context.
+The border is a plain hairline. Limits and context turn amber at 70% and red at 90%, but only the bar and the figure at risk take the colour: a week at 87% colours the week's bar and `87% wk`, not the session's figure or the clock. At red the border turns red too. A cooling cache colours only its own word and dot. On a narrow window words go before figures: first the reset clock and `wk`, then the task's label and the `ctx` and cache words, then the week bar, and only then the cache and context.
 
 The bar and every chart follow the app's light or dark mode. The bar has an opaque background of its own, so it stays readable even where an image is drawn in the other mode's colours.
 
