@@ -1255,7 +1255,7 @@ export const register: Register = (on, options) => {
       const row = (
         <Box height={1}>
           <Box position="absolute" top={-1} left={-1} right={-1}>
-            <Svg key="pill" source={pill.source} alt={pill.alt} />
+            <Svg key="pill" source={pill.source} alt={pill.alt} height={pill.height} />
           </Box>
           {/* One blank Button over each chip the pill drew (pill.ts sizes and places
               them), in a Box with no width: one narrower than its label would make the

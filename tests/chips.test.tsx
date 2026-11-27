@@ -354,13 +354,14 @@ test('drawn for the band, every divider sits on a cell middle, and the hover are
 
       // No Button's label fills its area, even with a cell a tenth smaller than measured:
       // the app would shrink it and draw an ellipsis. The area stretches it instead.
-      // Each Button, by the measure, fits inside its chip's area with room either side,
-      // placed in whole cells near its middle.
+      // Each Button, by the measure, fills its chip's area, placed in whole cells near its middle.
       areas.forEach(b => {
         const width = 21 + 3.64 * b.spaces
 
         expect(b.spaces).toBe(fitSpaces(b.cells, cell))
-        expect(width).toBeLessThan(b.cells * cell * 0.9)
+        // As wide as its area, to a space.
+        expect(width).toBeLessThanOrEqual(b.cells * cell + 1e-6)
+        expect(b.cells * cell - width).toBeLessThan(3.64 + 1e-6)
         expect(b.at).toBeGreaterThanOrEqual(b.left)
         expect((b.at - b.left) * cell + width).toBeLessThanOrEqual(b.cells * cell + 1e-6)
         expect(Math.abs((b.at - b.left) * cell + width / 2 - (b.cells * cell) / 2)).toBeLessThanOrEqual(cell / 2 + 1e-6)
