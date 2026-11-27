@@ -12,7 +12,7 @@ The bar has three groups.
 
 | Group | Meaning |
 | --- | --- |
-| **Task** | The task's label, one bar segment per step of Claude's task list, and a count like `2/5`. The current step pulses. With no task list, a short bar sweeps instead of showing a made-up percentage. It takes the spare width. |
+| **Task** | The task's label, one bar segment per step of Claude's task list, and a count like `2/5`. The current step pulses. With no task list, a short bar sweeps instead of showing a made-up percentage. With no task at all, the mascot and a dim `Ready`. It always leads and takes the spare width, so the figures sit together on the right. |
 | **Limits** | Two stacked bars, the 5-hour session limit on top and the weekly one below, then `23% · 41% wk` and the session's reset as a clock time, like `↻ 14:14`. When you are on pace to run out before the reset it reads `78% · out ~16:40`. |
 | **Context and cache** | A short bar of the context window with the tokens in it, like `48k ctx`, then a dot and `warm` or `cold`, or `cools 4m` when the cache is about to go cold. The two halves open different details. |
 
@@ -120,9 +120,9 @@ The sidebar has two tabs, `Cards` and `Timeline`. Timeline puts every agent on o
 
 ## Changed files
 
-Under the agents, in both tabs, **Changed files** lists every file edited this session, by you or a subagent, the latest first: `M` or `A` (added by a write to a new file), the path, `+n −n`, and a small bar of added against removed. Only edits that went through count. The header totals the lines, and a filter row narrows the list to `You` or one agent. Press a file to open its diff right there, the first two hunks shown and the rest behind `n more hunks`, with **Copy path** and who made the edits. **Collapse all** closes every open file. The list keeps the whole session; a new prompt doesn't clear it.
+Under the agents, in both tabs, **Changed files** lists every file edited this session (until the first edit it says so in one dim line), by you or a subagent, the latest first: `M` or `A` (added by a write to a new file), the path, `+n −n`, and a small bar of added against removed. Only edits that went through count. The header totals the lines, and a filter row narrows the list to `You` or one agent. Press a file to open its diff right there, the first two hunks shown and the rest behind `n more hunks`, with **Copy path** and who made the edits. **Collapse all** closes every open file. The list keeps the whole session; a new prompt doesn't clear it.
 
-The diff is built from the edits themselves, reading the file just before each one so lines land at their real numbers. It isn't `git diff`: a formatter that rewrites the file afterwards doesn't show. A file can't be seen being deleted, so there is no `D`. A file keeps at most about 400 diff lines, and the list 200 files.
+The diff is built from the edits themselves, reading the file just before each one so lines land at their real numbers. When a session starts with an empty list, for example after a restart or an update, the list is read back from the transcripts of the conversation and its agents; those diffs are placed where their new lines now stand in the file. It isn't `git diff`: a formatter that rewrites the file afterwards doesn't show. A file can't be seen being deleted, so there is no `D`. A file keeps at most about 400 diff lines, and the list 200 files.
 
 ## Known limits
 

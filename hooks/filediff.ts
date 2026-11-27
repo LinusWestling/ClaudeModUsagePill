@@ -375,3 +375,89 @@ export const relativeTo = (path: string, cwd: string): string => {
 
   return cwd !== '' && path.startsWith(base) ? path.slice(base.length) : path
 }
+
+// ── From a transcript ──
+
+type Block = { type?: unknown; [field: string]: unknown }
+
+const blocksOf = (content: unknown): Block[] =>
+  Array.isArray(content) ? content.filter((b): b is Block => typeof b === 'object' && b !== null) : []
+
+const resultText = (content: unknown): string =>
+  typeof content === 'string'
+    ? content
+    : blocksOf(content)
+        .map(b => (b.type === 'text' ? String(b.text ?? '') : ''))
+        .join('\n')
+
+/** A file tool's call found in a transcript that went through: what it asked, and what it said back. */
+export type PastChange = { change: Change; result: string }
+
+/**
+ * The file changes a conversation made, oldest first, read from its messages in
+ * the API form: each Edit, MultiEdit, Write or NotebookEdit call whose result
+ * came back without an error. What a session did before this mod was watching.
+ */
+export const changesInTranscript = (messages: readonly { role: string; content: unknown }[]): PastChange[] => {
+  const calls = new Map<string, Change>()
+  const done: PastChange[] = []
+
+  for (const m of messages) {
+    for (const b of blocksOf(m.content)) {
+      if (b.type === 'tool_use') {
+        const input = typeof b.input === 'object' && b.input !== null ? (b.input as Record<string, unknown>) : {}
+        const change = changeOf({ ...input, tool: b.name })
+
+        if (change) calls.set(String(b.id ?? ''), change)
+      } else if (b.type === 'tool_result') {
+        const change = calls.get(String(b.tool_use_id ?? ''))
+
+        if (change && b.is_error !== true) done.push({ change, result: resultText(b.content) })
+      }
+    }
+  }
+
+  return done
+}
+
+/**
+ * Hunks numbered from 1, moved to where `text` (the file as it is now) holds
+ * the edit's new lines: the nearest a change read back from a transcript can get
+ * to its real place. Left as they are where the text isn't found.
+ */
+export const placeHunks = (hunks: Hunk[], text: string | undefined, newText: string): Hunk[] => {
+  if (text === undefined || newText === '') return hunks
+
+  const at = text.indexOf(newText)
+
+  if (at < 0) return hunks
+
+  const shift = text.slice(0, at).split('\n').length - 1
+
+  return hunks.map(h => ({ ...h, oldStart: h.oldStart + shift, newStart: h.newStart + shift }))
+}
+
+/**
+ * The subagents a conversation started, read from its Agent calls: the id their
+ * result names (`agentId: …`) and the description they were given.
+ */
+export const agentsInTranscript = (messages: readonly { role: string; content: unknown }[]): { id: string; name: string }[] => {
+  const asked = new Map<string, string>()
+  const found: { id: string; name: string }[] = []
+
+  for (const m of messages) {
+    for (const b of blocksOf(m.content)) {
+      if (b.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task')) {
+        const input = typeof b.input === 'object' && b.input !== null ? (b.input as Record<string, unknown>) : {}
+
+        asked.set(String(b.id ?? ''), textOf(input.description) || textOf(input.subagent_type) || 'Subagent')
+      } else if (b.type === 'tool_result' && asked.has(String(b.tool_use_id ?? ''))) {
+        const id = /agentId:\s*([A-Za-z0-9_-]+)/.exec(resultText(b.content))?.[1]
+
+        if (id && !found.some(a => a.id === id)) found.push({ id, name: asked.get(String(b.tool_use_id))! })
+      }
+    }
+  }
+
+  return found
+}

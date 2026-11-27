@@ -8,7 +8,10 @@ import {
   YOU,
   actorsOf,
   addEdit,
+  agentsInTranscript,
   changeOf,
+  changesInTranscript,
+  placeHunks,
   filtered,
   hunksOfChange,
   relativeTo,
@@ -19,6 +22,8 @@ import type { Change } from './filediff'
 const changedFiles = atom({ plugin: 'usage-pill', key: 'changedFiles' } as const, [], { shape: 'files-1' })
 const filesOpen = atom({ plugin: 'usage-pill', key: 'filesOpen' } as const, [])
 const filesFilter = atom({ plugin: 'usage-pill', key: 'filesFilter' } as const, 'all')
+// Names of agents that edited files but are no longer in the agents list, read back from the transcript.
+const editorNames = atom({ plugin: 'usage-pill', key: 'editorNames' } as const, {})
 
 // The same declaration as register.tsx's: one value, read from two places.
 const agents = atom({ plugin: 'usage-pill', key: 'agents' } as const, [], { shape: 'agents-1' })
@@ -70,22 +75,40 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 /**
  * The Changed files section of the Subagents pane: a header with the totals, the
- * filter, and a row a file, opened to its diff. Nothing while no file has been
- * edited, so a session that changed none shows no trace of it.
+ * filter, and a row a file, opened to its diff. While no file has been edited it
+ * is its heading and one dim line, so it is clear where the list will be.
  */
 export async function filesSection($: EngineInterface, e: RenderInput<'Pane'>) {
   const all = await read($, changedFiles)
 
-  if (all.length === 0) return null
+  if (all.length === 0) {
+    const { Box, Text } = $.ui.resolve(e)
+
+    return (
+      <Box key="files" flexDirection="column">
+        <Text bold>Changed files</Text>
+        <Text dimColor size="caption">
+          No files edited in this session yet.
+        </Text>
+      </Box>
+    )
+  }
 
   const open = await read($, filesOpen)
   const who = await read($, filesFilter)
   const runs = await read($, agents)
+  const names = (await read($, editorNames)) ?? {}
   const cwd = await $.session.cwd().catch(() => '')
   const { Box, Button, Code, Text } = $.ui.resolve(e)
   const hasPictures = e.surface !== 'terminal'
 
-  const nameOf = (id: string | null) => (id === null ? 'you' : titleOf(runs.find(r => r.id === id)))
+  const nameOf = (id: string | null) => {
+    if (id === null) return 'you'
+
+    const run = runs.find(r => r.id === id)
+
+    return run ? titleOf(run) : (names[id] ?? 'Subagent')
+  }
   const actors = actorsOf(all)
   // A filter whose actor has nothing (gone with a cleared list) falls back to everyone.
   const key = who === 'all' || who === YOU || actors.includes(who) ? who : 'all'
@@ -225,7 +248,7 @@ export async function filesSection($: EngineInterface, e: RenderInput<'Pane'>) {
 const isAbsolute = (path: string) => path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
 
 /** What a file held ahead of a call: its text, or undefined when it isn't there or can't be read. */
-const readBefore = async ($: EngineInterface, path: string): Promise<string | undefined> => {
+async function readBefore($: EngineInterface, path: string): Promise<string | undefined> {
   try {
     if (!(await $.fs.exists(path))) return undefined
 
@@ -234,6 +257,58 @@ const readBefore = async ($: EngineInterface, path: string): Promise<string | un
     return typeof text === 'string' ? text : undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Fills an empty list from the transcripts: the main conversation's and each
+ * known agent's. So the list also holds what a session edited before this mod
+ * was watching it, or before the app was restarted. A change read back this way
+ * has no file from before it, so its hunks are placed where its new lines now
+ * stand in the file. Never throws.
+ */
+export async function seedFiles($: EngineInterface): Promise<void> {
+  try {
+    if ((await read($, changedFiles)).length > 0) return
+
+    const cwd = await $.session.cwd()
+    const main = await $.session.messages({ as: 'api' })
+
+    if (!Array.isArray(main)) return
+
+    const mainMessages = main as { role: string; content: unknown }[]
+    // Every agent the conversation started, finished or not, and any the list knows of besides.
+    const past = agentsInTranscript(mainMessages)
+    const known = (await read($, agents)).map(r => ({ id: r.id, name: titleOf(r) }))
+    const everyAgent = [...past, ...known.filter(k => !past.some(p => p.id === k.id))]
+    const sources: { by: string | null; agentId?: string }[] = [{ by: null }, ...everyAgent.map(a => ({ by: a.id, agentId: a.id }))]
+    let list: ChangedFile[] = []
+
+    await update($, editorNames, old => ({ ...Object.fromEntries(everyAgent.map(a => [a.id, a.name])), ...(old ?? {}) }))
+
+    for (const source of sources) {
+      const found = source.agentId === undefined ? main : await $.session.messages({ agentId: source.agentId, as: 'api' })
+
+      if (!Array.isArray(found)) continue
+
+      for (const { change, result } of changesInTranscript(found as { role: string; content: unknown }[])) {
+        const path = isAbsolute(change.path) ? change.path : `${cwd.replace(/\/$/, '')}/${change.path}`
+        const made = hunksOfChange(change, undefined, source.by)
+        const now = change.tool === 'Edit' || change.tool === 'MultiEdit' ? await readBefore($, path) : undefined
+        const first = change.edits?.[0]?.newText ?? ''
+
+        list = addEdit(list, path, source.by, {
+          hunks: placeHunks(made.hunks, now, first),
+          // A Write says whether it made the file or changed one.
+          isNew: change.tool === 'Write' && /created/i.test(result),
+        })
+      }
+    }
+
+    // A file edited live while this read ran keeps what the live note made.
+    if (list.length > 0) await update($, changedFiles, live => (live.length > 0 ? live : list))
+  } catch {
+    // Without a transcript the list starts from the next edit.
   }
 }
 
