@@ -3,20 +3,22 @@
 A Claude Code mod for the desktop app. It adds a bordered bar above the prompt, so you can see where a task, your limits and your cache stand without opening anything.
 
 ```
-Working ▰▰▰▱▱ 3/5  |  ◔ 14% session  |  ◔ 11% week  |  ◔ 370k / 1M  |  ◕ Warm cache
+Fixing contrast ▰▰▰▱▱ 2/5  |  ≡ 23% · 41% wk ↻ 14:14  |  ▬ 48k ctx  ● warm
 ```
 
 ## What it shows
 
-| Section | Meaning |
-| --- | --- |
-| **Task** | `Working` or `Done`, one bar segment per step of Claude's task list, and a count like `3/5`. The current step pulses. With no task list, a short bar sweeps instead of showing a made-up percentage. |
-| **Session** | How much of your 5-hour plan limit is used, then when it resets as a clock time, like `17% 11:10`. It turns amber when you are on pace to run out first. |
-| **Week** | How much of your weekly plan limit is used. |
-| **Context** | Tokens in the context window against its size. |
-| **Cache** | `Warm` or `Cold`. The ring empties as the cache ages. Reads `Cools 4m` when it is about to go cold. |
+The bar has three groups.
 
-Limits and context turn amber at 70% and red at 90%. The border takes the colour of whichever is highest. On a narrow window the bar drops week first, then cache, then context.
+| Group | Meaning |
+| --- | --- |
+| **Task** | The task's label, one bar segment per step of Claude's task list, and a count like `2/5`. The current step pulses. With no task list, a short bar sweeps instead of showing a made-up percentage. It takes the spare width. |
+| **Limits** | Two stacked bars, the 5-hour session limit on top and the weekly one below, then `23% · 41% wk` and the session's reset as a clock time, like `↻ 14:14`. When you are on pace to run out before the reset it reads `78% · out ~16:40`. |
+| **Context and cache** | A short bar of the context window with the tokens in it, like `48k ctx`, then a dot and `warm` or `cold`, or `cools 4m` when the cache is about to go cold. The two halves open different details. |
+
+When calm the border is a plain hairline. Limits and context turn amber at 70% and red at 90%: only the group at risk gets a tint, and the border takes its colour. A cooling cache tints only its own word and dot. On a narrow window words go before figures: first the reset clock and `wk`, then the task's label and the `ctx` and cache words, then the week bar, and only then the cache and context.
+
+The bar and every chart follow the app's light or dark mode. The bar has an opaque background of its own, so it stays readable even where an image is drawn in the other mode's colours.
 
 Session and week only appear on a Claude subscription, once a response has reported them.
 
@@ -46,7 +48,7 @@ Press a chip in the bar and its details open right under it, above the prompt. O
 
 | Chip | Opens |
 | --- | --- |
-| Session or week | **Limits**: the session percent and when it resets, a chart of the 5-hour window on a real clock (used so far, the pace line, the limit, and the stretch you would be blocked), three small tiles (`At this pace`, `This session`, `Pace`), and a week row with its bar and reset. |
+| Limits | **Limits**: the session percent and when it resets, a chart of the 5-hour window on a real clock (used so far, the pace line, the limit, and the stretch you would be blocked), three small tiles (`At this pace`, `This session`, `Pace`), and a week row with its bar and reset. |
 | Context | **Context**: a bar of the whole window with the used part split by category, then the categories in two groups, `Conversation` and `Always loaded`, each with its subtotal. The largest row is highlighted. When the bar has no room for every category, the smallest fold into one `▾ n more` row; click it to show them all, and `▴ Show less` to fold them again. A footer gives what the last turn added and its largest tool result, and **Compact now**. |
 | Cache | **Cache**: warm or cold, the minutes left and the time it cools, with a bar of the cache's hour and a mark where the warning comes. What your next message costs sent now against after it cools, in token-equivalents (a cache read costs a tenth of an input token, a cold start writes everything again at twice). The last reply split into tokens read from the cache, newly written and uncached. One bar per reply this session with cold starts in red, the hit rate, what the cache saved and when the cold starts were. A switch turns the five-minute warning off or on (kept across sessions), and **Compact now**. On a short bar the sections that matter least drop out first. |
 
@@ -116,12 +118,19 @@ An agent doesn't report how far along it is, so progress is what can be counted:
 
 The sidebar has two tabs, `Cards` and `Timeline`. Timeline puts every agent on one time axis. Each gets a thin bar from start to end: violet while running, green when done, red if it failed, amber if stopped. A small red dot marks where a tool call failed. On the right are `N tools · m:ss` and a status mark. Press a name to open that agent's chat.
 
+## Changed files
+
+Under the agents, in both tabs, **Changed files** lists every file edited this session, by you or a subagent, the latest first: `M` or `A` (added by a write to a new file), the path, `+n −n`, and a small bar of added against removed. Only edits that went through count. The header totals the lines, and a filter row narrows the list to `You` or one agent. Press a file to open its diff right there, the first two hunks shown and the rest behind `n more hunks`, with **Copy path** and who made the edits. **Collapse all** closes every open file. The list keeps the whole session; a new prompt doesn't clear it.
+
+The diff is built from the edits themselves, reading the file just before each one so lines land at their real numbers. It isn't `git diff`: a formatter that rewrites the file afterwards doesn't show. A file can't be seen being deleted, so there is no `D`. A file keeps at most about 400 diff lines, and the list 200 files.
+
 ## Known limits
 
 - **Tuned by eye for one setup.** The app doesn't let a mod style its rectangle above the prompt, so the bar is drawn over it, using pixel measurements taken from screenshots of the macOS and Windows desktop apps. It may sit a pixel or two off at other window widths, or further off on Linux and other app versions. To adjust it, change `MACOS` or `WINDOWS` in `hooks/pill.ts`, and `CELL_WIDTH` in `hooks/register.tsx`.
 - **Warm and cold are an estimate.** Claude Code doesn't report the cache's state, so the mod counts one hour from the last request. If your requests use the five-minute lifetime, for example on extra usage, it can say `Warm` after the cache has gone cold.
 - **The task bar depends on the desktop app.** It reads the desktop app's task-list tool, so other surfaces show the sweeping bar instead.
-- **Also tuned by eye.** The headroom row, the details under the bar, the timeline and the limit chart were tuned by eye on macOS dark mode. Where a chip's hover highlight sits depends on the same measured cell width as the bar.
+- **Also tuned by eye.** The headroom row, the details under the bar, the timeline and the limit chart were tuned by eye on macOS dark mode. Each chip's hover area is laid in whole cells, so it keeps the same gap from the dividers on any screen, and where it sits follows the same measured cell width as the bar.
+- **Light mode follows the page.** The bar and charts are images, which can't read the app's theme. They take the page's light or dark preference instead. Where the two differ the bar keeps its dark background and stays readable; the charts in the details may read faintly.
 - **Some notifications depend on the desktop app.** The delayed and away-only ones need it. A Claude Code older than 2.1.325 can't cancel a booked one.
 - **The largest tool result is an estimate.** It is the result's characters divided by 4.
 - **Terminal.** The terminal gets a plain text version of the same figures. It has not been checked by eye.
@@ -141,7 +150,7 @@ claude plugin validate .
 claude plugin test .
 ```
 
-The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar, `task.ts` follows the task list, `feed.ts` keeps each agent's tool calls `chat.ts` turns an agent's transcript and live stream into chat rows, `forecast.ts` holds the limit pace and its chart, `headroom.tsx` the context row and cache warnings, `cache.ts` the Cache module's figures and pictures, `timeline.ts` the timeline's scale and drawing, `popover.tsx` the details under the bar, `receipt.tsx` the session's ledger, and `notify.ts` the done notification.
+The code is in `hooks/`: `register.tsx` holds the hooks, `pill.ts` draws the bar, `task.ts` follows the task list, `feed.ts` keeps each agent's tool calls `chat.ts` turns an agent's transcript and live stream into chat rows, `forecast.ts` holds the limit pace and its chart, `headroom.tsx` the context row and cache warnings, `cache.ts` the Cache module's figures and pictures, `timeline.ts` the timeline's scale and drawing, `popover.tsx` the details under the bar, `receipt.tsx` the session's ledger, `notify.ts` the done notification, `files.tsx` the Changed files section with `filediff.ts` its line diff, and `scheme.ts` the drawings' light-mode colours.
 
 ## License
 

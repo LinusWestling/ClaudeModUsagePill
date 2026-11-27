@@ -3,6 +3,7 @@ import type { Color, ElementTable, EngineInterface } from 'claude-code'
 
 import type { Cache, Headroom, Reading } from '../types'
 import { compact, describeTool } from './agents'
+import { NEUTRAL } from './scheme'
 
 /** What fills the context, measured after a main-thread turn over the threshold. */
 export const headroom = atom({ plugin: 'usage-pill', key: 'headroom' } as const, null)
@@ -92,7 +93,7 @@ export const stackedBarSvg = (
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<clipPath id="round"><rect width="${width}" height="${height}" rx="${r}"/></clipPath>` +
-    `<rect width="${width}" height="${height}" rx="${r}" fill="rgba(255,255,255,.1)"/>` +
+    `<rect width="${width}" height="${height}" rx="${r}" fill="${NEUTRAL(0.22)}"/>` +
     `<g clip-path="url(#round)">${segments}</g></svg>`
   )
 }
@@ -123,7 +124,7 @@ export const windowBarSvg = (
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     `<clipPath id="round"><rect width="${width}" height="${height}" rx="${r}"/></clipPath>` +
-    `<rect width="${width}" height="${height}" rx="${r}" fill="rgba(255,255,255,.1)"/>` +
+    `<rect width="${width}" height="${height}" rx="${r}" fill="${NEUTRAL(0.22)}"/>` +
     `<g clip-path="url(#round)">${segments}</g></svg>`
   )
 }

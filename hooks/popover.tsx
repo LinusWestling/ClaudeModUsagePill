@@ -3,6 +3,7 @@ import type { Color, EngineInterface, Register, RenderInput } from 'claude-code'
 
 import type { Ledger, Popover } from '../types'
 import { compact, elapsed } from './agents'
+import { NEUTRAL } from './scheme'
 import { forecastChartSvg, forecastOf, localClock, outLabel, span } from './forecast'
 import {
   CACHE_TTL_MS,
@@ -330,7 +331,7 @@ export async function popoverPanel($: EngineInterface, e: RenderInput, width: nu
               flexGrow={1}
               width={`${Math.floor(100 / tiles.length) - 1}%`}
               paddingX={1}
-              {...(hasPictures ? { backgroundColor: 'rgba(255,255,255,.05)' } : {})}
+              {...(hasPictures ? { backgroundColor: NEUTRAL(0.08) } : {})}
             >
               <Text dimColor size="caption" wrap="truncate-end">
                 {t.label}

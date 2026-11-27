@@ -1,4 +1,5 @@
 import type { Cache, Spend } from '../types'
+import { inLight } from './scheme'
 
 // ── The Cache module's figures and pictures ─────────────────────────────────
 // Prices are in token-equivalents of an uncached input token, so they hold
@@ -58,7 +59,8 @@ export const countdownSvg = (left: number, warnAt: number, color: string, width:
     height,
     `<rect width="${width}" height="${height}" rx="${r}" ${TRACK}/>` +
       (filled > 0 ? `<rect width="${filled}" height="${height}" rx="${r}" fill="${color}"/>` : '') +
-      `<rect x="${Math.max(0, tick - 1)}" width="1.5" height="${height}" fill="#fff" fill-opacity="0.7"/>`,
+      `<style>.tick{fill:#fff;fill-opacity:.7}${inLight('.tick{fill:#000;fill-opacity:.55}')}</style>` +
+        `<rect class="tick" x="${Math.max(0, tick - 1)}" width="1.5" height="${height}"/>`,
   )
 }
 

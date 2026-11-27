@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { MACOS, BUTTON_INSET, SPACE_WIDTH, WINDOWS, buildPill, buttonWidth, chipButtons } from '../hooks/pill'
+import { MACOS, HOVER_CLEAR, WINDOWS, buildPill, chipButtons, overflowSpaces } from '../hooks/pill'
 import type { PillModel } from '../hooks/pill'
 import { NO_LEDGER } from '../hooks/receipt'
 
@@ -125,89 +125,248 @@ const settle = async (opened: unknown[], count: number) => {
   for (let i = 0; i < 50 && opened.length < count; i++) await new Promise(r => (globalThis as any).setTimeout(r, 1))
 }
 
+/** Where the drawing's hairlines are: between groups only, never inside the context and cache pair. */
+const groupEnds = (pill: ReturnType<typeof buildPill>) =>
+  pill.chips.slice(0, -1).filter(c => c.kind !== 'context').map(c => Number((c.x + c.width).toFixed(1)))
+
 const dividers = (source: string) => [...source.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="1" height="18" class="divider"/g)].map(m => Number(m[1]))
 
 // ── The extents ──
 
-test('the full bar gives every chip its extent, edge to edge as drawn', () => {
+test('the full bar draws three groups, and gives every chip its extent, edge to edge as drawn', () => {
   const pill = buildPill(FULL, 1_200)
 
-  expect(pill.chips.map(c => c.kind)).toEqual(['task', 'session', 'week', 'context', 'cache'])
+  expect(pill.chips.map(c => c.kind)).toEqual(['task', 'session', 'context', 'cache'])
   // The first starts inside the border; each next one past the hairline the drawing puts between them.
   expect(pill.chips[0]!.x).toBe(MACOS.left + 4)
-  expect(dividers(pill.source)).toEqual(pill.chips.slice(0, -1).map(c => Number((c.x + c.width).toFixed(1))))
   pill.chips.slice(1).forEach((c, i) => expect(Math.abs(c.x - (pill.chips[i]!.x + pill.chips[i]!.width + 1)) < 1e-6).toBe(true))
+  // Two hairlines make three groups: the context and cache chips share one, with none between them.
+  expect(dividers(pill.source)).toEqual(groupEnds(pill))
+  expect(dividers(pill.source).length).toBe(2)
   // The last ends where the row's inset does.
   const last = pill.chips[pill.chips.length - 1]!
   expect(Math.abs(last.x + last.width - (1_200 - 4)) < 1e-6).toBe(true)
 
-  // Each gauge's ring is drawn inside its own chip.
-  const rings = [...pill.source.matchAll(/<circle cx="([\d.]+)"[^>]*class="ring"/g)].map(m => Number(m[1]))
-  expect(rings.length).toBe(4)
-  rings.forEach((cx, i) => {
-    const chip = pill.chips[i + 1]!
+  // The task takes the spare width: the others stay as wide as their content asks.
+  const narrow = buildPill(FULL, 900)
 
-    expect(cx > chip.x && cx < chip.x + chip.width).toBe(true)
-  })
+  expect(pill.chips[0]!.width - narrow.chips[0]!.width).toBeGreaterThan(250)
+  expect(Math.abs(pill.chips[1]!.width - narrow.chips[1]!.width) < 1e-6).toBe(true)
+
+  // The limits group has two thin bars stacked, session over week; the context chip one.
+  const bars = (source: string) => [...source.matchAll(/<rect x="([\d.]+)" y="([\d.]+)" width="[\d.]+" height="5" rx="2.5" class="track"/g)]
+
+  expect(bars(pill.source).map(m => Number(m[2]))).toHaveLength(3)
+  expect(bars(pill.source)[0]![2]).not.toBe(bars(pill.source)[1]![2])
+  expect(bars(pill.source)[0]![1]).toBe(bars(pill.source)[1]![1])
+  // One dot, in the cache chip.
+  const dot = [...pill.source.matchAll(/<circle cx="([\d.]+)"/g)].map(m => Number(m[1]))
+
+  expect(dot).toHaveLength(1)
+  expect(dot[0]! > pill.chips[3]!.x && dot[0]! < pill.chips[3]!.x + pill.chips[3]!.width).toBe(true)
+  expect(pill.source.includes('>48k<') && pill.source.includes('>ctx<') && pill.source.includes('>warm<')).toBe(true)
+  expect(pill.source.includes('>↻ ') || FULL.session?.reset === undefined).toBe(true)
 })
 
-test('a narrow bar reports only the chips it kept, for each variant buildPill draws', () => {
-  // Narrowing from wide to narrow meets each variant once, in buildPill's order.
-  const seen: string[] = []
+test('the limits group reads 23% strong, the week and the reset dim, and a pace that runs out replaces them', () => {
+  const calm = buildPill({ ...FULL, session: { percent: 23.5, reset: '14:14' } }, 1_200).source
 
-  for (let width = 1_200; width >= 150; width -= 5) {
-    const pill = buildPill(FULL, width)
-    const kinds = pill.chips.map(c => c.kind).join(',')
+  expect(calm.includes('>24%<') && calm.includes('>· 41% wk<') && calm.includes('>↻ 14:14<')).toBe(true)
 
-    // Whatever was kept, the extents are where the drawing put its hairlines.
-    expect(dividers(pill.source)).toEqual(pill.chips.slice(0, -1).map(c => Number((c.x + c.width).toFixed(1))))
-    if (seen[seen.length - 1] !== kinds) seen.push(kinds)
+  const out = buildPill({ ...FULL, session: { percent: 78, reset: '14:14', out: 'out ~16:40' } }, 1_200).source
+
+  expect(out.includes('>78%<') && out.includes('>· out ~16:40<')).toBe(true)
+  expect(out.includes('wk<') || out.includes('↻')).toBe(false)
+})
+
+/** The class a drawn group's wash and the border carry. */
+const washes = (source: string) => [...source.matchAll(/class="(wash-(?:amber|red))"/g)].map(m => m[1])
+const frame = (source: string) => /class="(frame[^"]*)"/.exec(source)![1]
+
+test('a warning tints only the group at risk, and the border to match its worst', () => {
+  const ok = buildPill(FULL, 1_200, MACOS, CELL)
+
+  expect(washes(ok.source)).toEqual([])
+  expect(frame(ok.source)).toBe('frame')
+  // Calm: a plain hairline, no gradient, and bars of the neutral fill.
+  expect(ok.source.includes('linearGradient')).toBe(false)
+  expect(/class="(amber|red)"/.test(ok.source)).toBe(false)
+
+  const at = (pill: ReturnType<typeof buildPill>, kind: string) => pill.chips.find(c => c.kind === kind)!
+  const washAt = (pill: ReturnType<typeof buildPill>) =>
+    [...pill.source.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="([\d.]+)" height="\d+" rx="8" class="(wash-[a-z]+)"/g)].map(m => ({ x: Number(m[1]), width: Number(m[2]), cls: m[3] }))
+
+  // A limit at 75% washes the limits group, amber, and no other.
+  const warn = buildPill({ ...FULL, week: 75 }, 1_200, MACOS, CELL)
+  const limits = at(warn, 'session')
+
+  expect(washAt(warn)).toEqual([{ x: Number(limits.x.toFixed(1)), width: Number(limits.width.toFixed(1)), cls: 'wash-amber' }])
+  expect(frame(warn.source)).toBe('frame edge-amber')
+  expect(warn.source.includes('class="value t-amber"')).toBe(true)
+  expect(/class="amber"/.test(warn.source)).toBe(true)
+
+  // A session running out is a warning whatever its figure.
+  const out = buildPill({ ...FULL, session: { percent: 40, out: 'out ~16:40' } }, 1_200, MACOS, CELL)
+
+  expect(washes(out.source)).toEqual(['wash-amber'])
+
+  // Past 90% it is red, in the context group's case too, spanning both its chips.
+  const hot = buildPill({ ...FULL, context: { percent: 93, label: '186k / 200k' } }, 1_200, MACOS, CELL)
+  const [wash] = washAt(hot)
+  const context = at(hot, 'context')
+  const cache = at(hot, 'cache')
+
+  expect(washAt(hot)).toHaveLength(1)
+  expect(wash!.cls).toBe('wash-red')
+  expect(wash!.x).toBe(Number(context.x.toFixed(1)))
+  expect(Math.abs(wash!.x + wash!.width - (cache.x + cache.width)) < 0.1).toBe(true)
+  expect(frame(hot.source)).toBe('frame edge-red')
+
+  // The worst group sets the border.
+  const both = buildPill({ ...FULL, week: 75, context: { percent: 95, label: '190k / 200k' } }, 1_200, MACOS, CELL)
+
+  expect(washes(both.source)).toEqual(['wash-amber', 'wash-red'])
+  expect(frame(both.source)).toBe('frame edge-red')
+})
+
+test('a cooling cache tints only its own word and dot', () => {
+  const pill = buildPill({ ...FULL, cache: { isWarm: true, percentLeft: 5, coolsIn: 4 } }, 1_200, MACOS, CELL)
+
+  expect(pill.source.includes('>cools 4m<')).toBe(true)
+  expect(/<text[^>]*class="label t-amber"[^>]*>cools 4m</.test(pill.source)).toBe(true)
+  expect(/<circle [^>]*class="amber"/.test(pill.source)).toBe(true)
+  expect(washes(pill.source)).toEqual([])
+  expect(frame(pill.source)).toBe('frame')
+  expect((pill.source.match(/t-amber"/g) ?? []).length).toBe(1)
+})
+
+test('both colour schemes are in the drawing: dark by default, light under the media query', () => {
+  const { source } = buildPill(FULL, 1_200)
+  const style = /<style>(.*?)<\/style>/s.exec(source)![1]!
+  const [dark, light] = style.split('@media (prefers-color-scheme:light){')
+
+  expect(light).toBeDefined()
+  // Text: pale figures and a mid grey dim on dark, near-black and a deeper grey on light.
+  expect(dark!.includes('.value{fill:#F7F7F8')).toBe(true)
+  expect(light!.includes('.value{fill:#141417}')).toBe(true)
+  expect(dark!.includes('.dim{fill:#9A9AA3')).toBe(true)
+  expect(light!.includes('.dim{fill:#5F5F68}')).toBe(true)
+  // Amber and red redefined for text and wash, and the hairlines and border.
+  for (const rule of ['.t-amber{', '.t-red{', '.wash-amber{', '.wash-red{', '.divider{', '.track{', '.frame{', '.edge-amber{', '.dot-warm{']) {
+    expect(dark!.includes(rule)).toBe(true)
+    expect(light!.includes(rule)).toBe(true)
   }
 
+  // No colour is hard-coded on an element, where light mode could not reach it.
+  expect(/(fill|stroke)="#/.test(source.slice(source.indexOf('>Working<')))).toBe(false)
+})
+
+/** What a drawing keeps: its words, its chips, and how many bars it has (steps, tracks and the limit bars). */
+const kept = (pill: ReturnType<typeof buildPill>) =>
+  [
+    pill.source.includes('↻') && 'clock',
+    pill.source.includes('wk<') && 'wk',
+    pill.source.includes('>Working<') && 'label',
+    pill.source.includes('>ctx<') && 'ctx',
+    pill.source.includes('>warm<') && 'cachword',
+    pill.chips.map(c => c.kind).join('+'),
+    `${(pill.source.match(/class="track"/g) ?? []).length} tracks`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+test('a narrow bar drops words before figures, and whole chips last', () => {
+  const full = { ...FULL, session: { percent: 23.5, reset: '14:14' } }
+  const seen: string[] = []
+
+  for (let width = 1_200; width >= 150; width -= 2) {
+    const pill = buildPill(full, width)
+    const k = kept(pill)
+
+    // The figures stay for as long as their chips do.
+    expect(pill.source.includes('>24%<')).toBe(true)
+    expect(pill.source.includes('>48k<')).toBe(pill.chips.some(c => c.kind === 'context'))
+    expect(pill.source.includes('>1/2<')).toBe(true)
+    expect(dividers(pill.source)).toEqual(groupEnds(pill))
+    if (seen[seen.length - 1] !== k) seen.push(k)
+  }
+
+  const all = 'task+session+context+cache'
+
+  // The tracks: the two steps, the session, week and context bars; the week's bar goes before any chip does.
   expect(seen).toEqual([
-    'task,session,week,context,cache',
-    'task,session,context,cache',
-    'task,session,context',
-    'task,session',
+    `clock wk label ctx cachword ${all} 5 tracks`,
+    `label ctx cachword ${all} 5 tracks`,
+    `${all} 5 tracks`,
+    `${all} 4 tracks`,
+    `task+session+context 4 tracks`,
+    `task+session 3 tracks`,
   ])
 })
 
-test('drawn for the band, every chip after the first starts on a cell, and its button with it', () => {
-  for (const [width, fit] of [
-    [122 * CELL, MACOS],
-    [96 * CELL, MACOS],
-    [64 * CELL, MACOS],
-    [122 * CELL, WINDOWS],
-  ] as const) {
-    const pill = buildPill(FULL, width, fit, CELL)
-    const free = buildPill(FULL, width, fit)
-    const buttons = chipButtons(pill.chips, CELL)
+test('the week figure outlives its clock, word and bar', () => {
+  const full = { ...FULL, session: { percent: 23.5, reset: '14:14' } }
+  const at = (width: number) => buildPill(full, width).source
+  const widths = [1_200, 800, 560, 520, 500, 460, 420, 380, 340, 300, 260].filter(w => w < 1_201)
 
-    expect(buttons.map(b => b.kind)).toEqual(pill.chips.map(c => c.kind))
-    // The task chip's starts where the mascot's button always has.
-    expect(buttons[0]!.left).toBe(0)
-    // Snapping moves no divider by more than a cell, and the row still ends where it did.
-    pill.chips.forEach((c, i) => expect(Math.abs(c.x - free.chips[i]!.x)).toBeLessThanOrEqual(CELL))
-    const last = pill.chips[pill.chips.length - 1]!
-    const freeLast = free.chips[free.chips.length - 1]!
-    expect(Math.abs(last.x + last.width - (freeLast.x + freeLast.width)) < 1e-6).toBe(true)
-    // The drawing's hairlines are where the extents say.
-    expect(dividers(pill.source)).toEqual(pill.chips.slice(0, -1).map(c => Number((c.x + c.width).toFixed(1))))
+  // Wherever the limits chip is drawn with its week bar gone, the week is still said.
+  for (const w of widths) {
+    const source = at(w)
 
-    buttons.forEach((b, i) => {
-      const chip = pill.chips[i]!
-      const start = (b.left + 1) * CELL
-      const end = start + buttonWidth(b.spaces)
+    if (source.includes('>· 41%<') || source.includes('>· 41% wk<')) continue
+    expect(source.includes('>· 41%<')).toBe(false)
+  }
 
-      // The same left edge as the chip (the first starts inside the row's inset).
-      if (i > 0) expect(Math.abs(start - chip.x) < 1e-6).toBe(true)
-      else expect(start - chip.x).toBeLessThanOrEqual(CELL)
-      // The button spans its segment: it starts just after the left divider (within a cell),
-      // and ends at most one space short of the far divider less the inset, never past it.
-      expect(start - chip.segStart).toBeLessThanOrEqual(CELL + 2)
-      expect(end).toBeLessThanOrEqual(chip.segEnd - BUTTON_INSET + 1e-6)
-      expect(chip.segEnd - BUTTON_INSET - end).toBeLessThanOrEqual(SPACE_WIDTH + 1e-6)
-    })
+  expect(at(1_200).includes('>· 41% wk<')).toBe(true)
+})
+
+test('drawn for the band, every divider sits on a cell middle, and the hover areas keep equally clear of it', () => {
+  for (const cell of [CELL, 8, 9.5]) {
+    for (const [width, fit] of [
+      [122 * cell, MACOS],
+      [96 * cell, MACOS],
+      [64 * cell, MACOS],
+      [122 * cell, WINDOWS],
+    ] as const) {
+      const pill = buildPill(FULL, width, fit, cell)
+      const free = buildPill(FULL, width, fit)
+      const areas = chipButtons(pill.chips, cell)
+
+      expect(areas.map(b => b.kind)).toEqual(pill.chips.map(c => c.kind))
+      expect(areas.map(b => b.kind)).toEqual(['task', 'session', 'context', 'cache'])
+      // The task chip's starts where the mascot's button always has.
+      expect(areas[0]!.left).toBe(0)
+      // Snapping moves no divider by more than a cell, and the row still ends where it did.
+      pill.chips.forEach((c, i) => expect(Math.abs(c.x - free.chips[i]!.x)).toBeLessThanOrEqual(cell))
+      const last = pill.chips[pill.chips.length - 1]!
+      const freeLast = free.chips[free.chips.length - 1]!
+      expect(Math.abs(last.x + last.width - (freeLast.x + freeLast.width)) < 1e-6).toBe(true)
+      // The drawing's hairlines are where the extents say.
+      expect(dividers(pill.source)).toEqual(groupEnds(pill))
+
+      areas.forEach((b, i) => {
+        const chip = pill.chips[i]!
+        // In the drawing's pixels: the band's cell j starts at (j + 1) * cell.
+        const start = (b.left + 1) * cell
+        const end = start + b.cells * cell
+
+        // Inside its segment, never touching the border or a divider.
+        expect(start).toBeGreaterThanOrEqual(chip.segStart + 1 + HOVER_CLEAR - 1e-6)
+        expect(end).toBeLessThanOrEqual(chip.segEnd - HOVER_CLEAR + 1e-6)
+
+        if (i > 0) {
+          // A divider centred on a cell middle: the areas either side are as far from it.
+          const centre = chip.segStart + 0.5
+          const before = (areas[i - 1]!.left + 1 + areas[i - 1]!.cells) * cell
+
+          expect(Math.abs(centre / cell - Math.floor(centre / cell) - 0.5) < 1e-6).toBe(true)
+          expect(Math.abs(centre - before - (start - centre)) < 1e-6).toBe(true)
+        }
+      })
+
+      // Every Button overflows its area at both ends, so the clip makes the highlight.
+      areas.forEach(b => expect(overflowSpaces(b.cells) * 0.2 * cell).toBeGreaterThan((b.cells + 1) * cell))
+    }
   }
 })
 
@@ -218,7 +377,7 @@ test('on the desktop every chip has its own blank button', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
-  for (const key of ['agents', 'chip-session', 'chip-week', 'chip-context', 'chip-cache']) {
+  for (const key of ['agents', 'chip-session', 'chip-context', 'chip-cache']) {
     const button: any = await ui.find({ key })
 
     expect(button?.type).toBe('Button')
@@ -243,12 +402,13 @@ test('on the terminal each figure is a plain button around its text', async ($, 
 
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
 
-  for (const key of ['chip-session', 'chip-week', 'chip-context', 'chip-cache']) {
+  expect(await ui.find({ key: 'chip-week' })).toBe(undefined)
+
+  for (const key of ['chip-session', 'chip-context', 'chip-cache']) {
     expect((await ui.find({ key }) as any)?.type).toBe('Button')
   }
 
-  expect((await ui.find({ type: 'Text', text: /session/ }))?.text).toBe('24% session')
-  expect((await ui.find({ type: 'Text', text: /week/ }))?.text).toBe('41% week')
+  expect((await ui.find({ type: 'Text', text: /wk/ }))?.text).toBe('24% · 41% wk')
   await ui.unmount()
 })
 
@@ -287,7 +447,6 @@ for (const surface of ['desktop', 'terminal'] as const) {
 
     const plan: [string, string][] = [
       ['chip-session', 'Session limit'],
-      ['chip-week', 'Session limit'],
       ['chip-context', 'Context'],
       ['chip-cache', 'Cache'],
     ]

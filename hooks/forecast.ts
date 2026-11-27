@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { Limit, LimitSample, StoredSamples } from '../types'
+import { inLight } from './scheme'
 
 /** The 5-hour window's readings this session holds, oldest first. */
 export const limitSamples = atom({ plugin: 'usage-pill', key: 'limitSamples' } as const, [])
@@ -289,7 +290,15 @@ export const forecastChartSvg = (
     `.used{stroke:${CORAL};stroke-width:2;fill:none;stroke-linejoin:round;stroke-linecap:round}` +
     `.pace{stroke:${AMBER};stroke-width:1.5;stroke-dasharray:4 3;fill:none;stroke-linecap:round}` +
     `.now{stroke:rgba(255,255,255,.4);stroke-width:1;stroke-dasharray:1 3;stroke-linecap:round}` +
-    `.chip{font-weight:700;fill:${PANEL}}</style>`
+    `.chip{font-weight:700;fill:${PANEL}}.mark{fill:#c9c8cc}.quiet{fill:#5f5e62}.halo,.out{stroke:${PANEL}}.hollow{fill:${PANEL}}` +
+    `.frame{fill:rgba(255,255,255,.03);stroke:rgba(255,255,255,.1)}.ahead{fill:rgba(255,255,255,.035)}` +
+    // On a light panel the hairlines darken, the grey text deepens and the dots' halos turn white.
+    inLight(
+      `text{fill:#5F5E63}.grid{stroke:rgba(0,0,0,.08)}.base{stroke:rgba(0,0,0,.2)}.now{stroke:rgba(0,0,0,.45)}` +
+        `.mark{fill:#3A393D}.quiet{fill:#8A898E}.halo,.out{stroke:#fff}.hollow{fill:#fff}` +
+        `.frame{fill:rgba(0,0,0,.02);stroke:rgba(0,0,0,.12)}.ahead{fill:rgba(0,0,0,.035)}`,
+    ) +
+    `</style>`
 
   if (!Number.isFinite(end)) return `${head}${style}</svg>`
 
@@ -309,12 +318,12 @@ export const forecastChartSvg = (
   const hasClock = clock(start) !== undefined
 
   let body = framed
-    ? `<rect x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="10" fill="rgba(255,255,255,.03)" stroke="rgba(255,255,255,.1)"/>`
+    ? `<rect class="frame" x=".5" y=".5" width="${w - 1}" height="${h - 1}" rx="10"/>`
     : ''
 
   // Past and future: the future part of the window reads a touch lighter.
   if (nowX < right) {
-    body += `<rect x="${nowX.toFixed(1)}" y="${inset.top}" width="${(right - nowX).toFixed(1)}" height="${plotH}" fill="rgba(255,255,255,.035)"/>`
+    body += `<rect x="${nowX.toFixed(1)}" y="${inset.top}" width="${(right - nowX).toFixed(1)}" height="${plotH}" class="ahead"/>`
   }
 
   // The time you'd be blocked: from the run-out to the reset.
@@ -326,7 +335,7 @@ export const forecastChartSvg = (
 
   body +=
     `<line class="grid" x1="${inset.left}" x2="${right}" y1="${y(50).toFixed(1)}" y2="${y(50).toFixed(1)}"/>` +
-    `<text x="${right - 2}" y="${(y(50) - 3).toFixed(1)}" text-anchor="end" style="fill:#5f5e62">50%</text>` +
+    `<text x="${right - 2}" y="${(y(50) - 3).toFixed(1)}" text-anchor="end" class="quiet">50%</text>` +
     `<line class="base" x1="${inset.left}" x2="${right}" y1="${bottom}" y2="${bottom}"/>` +
     `<line class="limit" x1="${inset.left}" x2="${right}" y1="${y(100)}" y2="${y(100)}"/>` +
     `<text x="${inset.left + 4}" y="${y(100) + 11}" style="fill:${RED};fill-opacity:.85">Limit</text>`
@@ -359,7 +368,7 @@ export const forecastChartSvg = (
   }
 
   if (nowX > inset.left + 1 && nowX < right - 1 && current !== undefined) {
-    body += `<text x="${nowX.toFixed(1)}" y="${labelRow}" text-anchor="middle" style="fill:#c9c8cc">now</text>`
+    body += `<text x="${nowX.toFixed(1)}" y="${labelRow}" text-anchor="middle" class="mark">now</text>`
   }
 
   // What was used, to now.
@@ -399,7 +408,7 @@ export const forecastChartSvg = (
       const overlaps = cx < stopX + 4
       const cy = overlaps ? stopY + 8 : stopY + 5
 
-      body += `<circle class="out" cx="${stopX.toFixed(1)}" cy="${stopY.toFixed(1)}" r="3.5" fill="${AMBER}" stroke="${PANEL}" stroke-width="1.5"/>`
+      body += `<circle class="out" cx="${stopX.toFixed(1)}" cy="${stopY.toFixed(1)}" r="3.5" fill="${AMBER}" stroke-width="1.5"/>`
       outChip =
         `<rect x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" width="${cw}" height="15" rx="7.5" fill="${AMBER}"/>` +
         `<text class="chip" x="${(cx + cw / 2).toFixed(1)}" y="${(cy + 10.5).toFixed(1)}" text-anchor="middle">${text}</text>`
@@ -407,7 +416,7 @@ export const forecastChartSvg = (
       const text = `~${Math.round(forecast.atReset)}% at reset`
 
       body +=
-        `<circle cx="${stopX.toFixed(1)}" cy="${stopY.toFixed(1)}" r="2.5" fill="${PANEL}" stroke="${AMBER}" stroke-width="1.2"/>` +
+        `<circle cx="${stopX.toFixed(1)}" cy="${stopY.toFixed(1)}" r="2.5" class="hollow" stroke="${AMBER}" stroke-width="1.2"/>` +
         `<text x="${(right - 4).toFixed(1)}" y="${clamp(stopY - 7, inset.top + 20, bottom - 4).toFixed(1)}" text-anchor="end">${text}</text>`
     }
   }
@@ -421,7 +430,7 @@ export const forecastChartSvg = (
     const cy = clamp(dy - 21, inset.top + 14, bottom - 17)
 
     body +=
-      `<circle cx="${nowX.toFixed(1)}" cy="${dy.toFixed(1)}" r="3.5" fill="${CORAL}" stroke="${PANEL}" stroke-width="1.5"/>` +
+      `<circle cx="${nowX.toFixed(1)}" cy="${dy.toFixed(1)}" r="3.5" fill="${CORAL}" class="halo" stroke-width="1.5"/>` +
       `<rect x="${cx.toFixed(1)}" y="${cy.toFixed(1)}" width="${cw}" height="15" rx="7.5" fill="${CORAL}"/>` +
       `<text class="chip" x="${(cx + cw / 2).toFixed(1)}" y="${(cy + 10.5).toFixed(1)}" text-anchor="middle">${text}</text>`
   }
