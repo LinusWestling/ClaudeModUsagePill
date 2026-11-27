@@ -181,21 +181,22 @@ test('the limits group reads 23% strong, the week and the reset dim, and a pace 
 
 const frame = (source: string) => /class="(frame[^"]*)"/.exec(source)![1]
 
-test('a warning colours only the bar and the figure at risk; the border only at red', () => {
+test('a warning colours only the bar, the figure at risk and the border', () => {
   const ok = buildPill(FULL, 1_200, MACOS, CELL)
 
-  // Calm: a plain hairline, no gradient, and bars of the neutral fill.
+  // Calm: the border runs through the sections' colours, each bar in its section's own.
   expect(frame(ok.source)).toBe('frame')
-  expect(ok.source.includes('linearGradient')).toBe(false)
+  expect(ok.source.includes('<linearGradient id="edge"')).toBe(true)
   expect(/class="(amber|red)"/.test(ok.source)).toBe(false)
+  for (const tint of ['c-session', 'c-week', 'c-context']) expect(ok.source.includes(`class="${tint}"`)).toBe(true)
   // No group is ever washed.
   expect(ok.source.includes('wash-')).toBe(false)
 
-  // The week at 75%: its bar and its own figure turn amber, the session's percent, the
-  // clock and the border do not.
+  // The week at 75%: its bar, its own figure and the border turn amber; the session's
+  // percent and the clock do not.
   const warn = buildPill({ ...FULL, session: { percent: 23.5, reset: '14:14' }, week: 75 }, 1_200, MACOS, CELL)
 
-  expect(frame(warn.source)).toBe('frame')
+  expect(frame(warn.source)).toBe('frame edge-amber')
   expect(warn.source.includes('wash-')).toBe(false)
   expect(/class="amber"/.test(warn.source)).toBe(true)
   expect(/class="dim t-amber"[^>]*>· 75% wk</.test(warn.source)).toBe(true)
@@ -353,14 +354,24 @@ test('drawn for the band, every divider sits on a cell middle, and the hover are
 
       // No Button's label fills its area, even with a cell a tenth smaller than measured:
       // the app would shrink it and draw an ellipsis. The area stretches it instead.
-      areas.forEach(b => expect(21 + 3.64 * fitSpaces(b.cells, cell)).toBeLessThan(b.cells * cell * 0.9))
+      // Each Button, by the measure, fits inside its chip's area with room either side,
+      // placed in whole cells near its middle.
+      areas.forEach(b => {
+        const width = 21 + 3.64 * b.spaces
+
+        expect(b.spaces).toBe(fitSpaces(b.cells, cell))
+        expect(width).toBeLessThan(b.cells * cell * 0.9)
+        expect(b.at).toBeGreaterThanOrEqual(b.left)
+        expect((b.at - b.left) * cell + width).toBeLessThanOrEqual(b.cells * cell + 1e-6)
+        expect(Math.abs((b.at - b.left) * cell + width / 2 - (b.cells * cell) / 2)).toBeLessThanOrEqual(cell / 2 + 1e-6)
+      })
     }
   }
 })
 
 // ── The band ──
 
-test('on the desktop every chip has its own blank button', async ($, on) => {
+test('on the desktop every chip has its own blank button, in a Box with no width', async ($, on) => {
   seed(on, { reading: READING, cache: CACHE, task: TASK })
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
@@ -370,6 +381,14 @@ test('on the desktop every chip has its own blank button', async ($, on) => {
 
     expect(button?.type).toBe('Button')
     expect(/^ +$/.test(button.props.label)).toBe(true)
+  }
+
+  // A Box narrower than its Button's label would make the app draw an ellipsis in it.
+  for (const kind of ['task', 'session', 'context', 'cache']) {
+    const box: any = await ui.find({ key: `hit-${kind}` })
+
+    expect(box?.type).toBe('Box')
+    expect(box.props.width).toBe(undefined)
   }
 
   await ui.unmount()

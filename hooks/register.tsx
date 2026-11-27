@@ -51,7 +51,7 @@ import {
   noteToolResult,
   startTurn,
 } from './headroom'
-import { MACOS, WINDOWS, buildPill, chipButtons, fitSpaces } from './pill'
+import { MACOS, WINDOWS, buildPill, chipButtons } from './pill'
 import { filesSection, registerFiles, seedFiles } from './files'
 import { registerNotify } from './notify'
 import { registerReceipt } from './receipt'
@@ -252,7 +252,7 @@ const scrollToEnd = ($: EngineInterface) =>
 /**
  * A chip button's label is made of these, as it lies over a chip the pill draws
  * beneath it: no-break spaces, which no surface collapses. Their count sizes it
- * to its hover area (`fitSpaces` in pill.ts).
+ * to its chip (`chipButtons` in pill.ts).
  */
 const BLANK = '\u00a0'
 
@@ -1257,23 +1257,15 @@ export const register: Register = (on, options) => {
           <Box position="absolute" top={-1} left={-1} right={-1}>
             <Svg key="pill" source={pill.source} alt={pill.alt} />
           </Box>
-          {/* One hover area over each chip the pill drew, whole cells wide (pill.ts
-              places them), with a blank button sized to it and centred, so its native
-              highlight keeps the same gap at both ends. The task chip's keeps its old key. */}
+          {/* One blank Button over each chip the pill drew (pill.ts sizes and places
+              them), in a Box with no width: one narrower than its label would make the
+              app shrink it and draw an ellipsis. The task chip's keeps its old key. */}
           {chipButtons(pill.chips, CELL_WIDTH).map(b => (
-            <Box
-              key={`hit-${b.kind}`}
-              position="absolute"
-              top={0}
-              left={b.left}
-              width={b.cells}
-              flexDirection="row"
-              justifyContent="center"
-            >
+            <Box key={`hit-${b.kind}`} position="absolute" top={0} left={b.at}>
               <Button
                 key={b.kind === 'task' ? 'agents' : `chip-${b.kind}`}
                 plain
-                label={BLANK.repeat(fitSpaces(b.cells, CELL_WIDTH))}
+                label={BLANK.repeat(b.spaces)}
                 onPress={() => pressChip($, b.kind)}
               />
             </Box>

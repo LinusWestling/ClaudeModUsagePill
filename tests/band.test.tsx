@@ -77,7 +77,7 @@ test('a pace that runs out before the reset names the time in the session chip, 
   expect(/>↻/.test(svg.props.source)).toBe(false)
   // Amber, though 50% alone would be calm.
   expect(svg.props.source.includes('class="value t-amber"')).toBe(true)
-  expect(svg.props.source.includes('class="frame"')).toBe(true)
+  expect(svg.props.source.includes('class="frame edge-amber"')).toBe(true)
   expect(/at this pace runs out (~\d\d:\d\d|in 1h 40m)/.test(svg.props.alt)).toBe(true)
   await ui.unmount()
 

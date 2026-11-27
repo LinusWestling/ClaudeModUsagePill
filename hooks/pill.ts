@@ -329,13 +329,14 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
   const divider = (at: number) =>
     `<rect x="${at.toFixed(1)}" y="${mid - 9}" width="1" height="18" class="divider"/>`
 
-  const bars = (at: number, y: number, length: number, percent: number, level: Level) => {
+  // Calm, each bar wears its section's colour; amber or red take over when it is at risk.
+  const bars = (at: number, y: number, length: number, percent: number, level: Level, tint: 'c-session' | 'c-week' | 'c-context') => {
     const filled = Math.min(length, Math.max(THIN, (Math.min(100, Math.max(0, percent)) / 100) * length))
 
     return (
       `<rect x="${at.toFixed(1)}" y="${y}" width="${length}" height="${THIN}" rx="${THIN / 2}" class="track"/>` +
       (percent > 0
-        ? `<rect x="${at.toFixed(1)}" y="${y}" width="${filled.toFixed(1)}" height="${THIN}" rx="${THIN / 2}" class="${FILL[level]}"/>`
+        ? `<rect x="${at.toFixed(1)}" y="${y}" width="${filled.toFixed(1)}" height="${THIN}" rx="${THIN / 2}" class="${level === 0 ? tint : FILL[level]}"/>`
         : '')
     )
   }
@@ -413,11 +414,11 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
       const stacked = session !== undefined && hasWeekBar
 
       if (session) {
-        body += bars(at, stacked ? mid - 7 : mid - THIN / 2, limits.bar, session.percent, session.level)
+        body += bars(at, stacked ? mid - 7 : mid - THIN / 2, limits.bar, session.percent, session.level, 'c-session')
       }
 
       if (hasWeekBar && week) {
-        body += bars(at, stacked ? mid + 2 : mid - THIN / 2, limits.bar, week.percent, week.level)
+        body += bars(at, stacked ? mid + 2 : mid - THIN / 2, limits.bar, week.percent, week.level, 'c-week')
       }
 
       at += limits.bar + 8
@@ -437,7 +438,7 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     if (chip.kind === 'context' && context) {
       const tone = TONE[worse(context.level)]
 
-      body += bars(at, mid - THIN / 2, CONTEXT_BAR, context.percent, context.level)
+      body += bars(at, mid - THIN / 2, CONTEXT_BAR, context.percent, context.level, 'c-context')
       at += CONTEXT_BAR + 7
       body += text(at, context.figure, `value${tone}`)
       at += widthOf(context.figure, true)
@@ -480,7 +481,9 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     `.divider{fill:rgba(255,255,255,.12)}.track{fill:rgba(255,255,255,.1)}` +
     // Opaque, so the figures keep their contrast even where the image is told the
     // wrong scheme (a light app on a dark system): then it is a dark pill, still readable.
-    `.frame{fill:#2B2B29;stroke:${NEUTRAL(0.45)}}` +
+    `.frame{fill:#2B2B29;stroke:url(#edge);stroke-opacity:.8;stroke-width:1.25}` +
+    // The sections' colours, left to right: the border runs through them in the same order.
+    `.c-session,.s1{fill:#FF7A59;stop-color:#FF7A59}.c-week,.s2{fill:#A98BFF;stop-color:#A98BFF}.c-context,.s3{fill:#4CC9F0;stop-color:#4CC9F0}` +
     `.label{fill:#E8E8EC}.value{fill:#F7F7F8;font-weight:600}.dim{fill:#9A9AA3;font-weight:450}` +
     `.fill{fill:#C4C4CC}.done,.pulse,.sweep{fill:#FF7A59}.amber{fill:#FFB02E}.red{fill:#FF5C5C}` +
     `.dot-warm{fill:#4CC38A}.dot-cold{fill:#5AA9FF}` +
@@ -489,7 +492,8 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     // and amber and red deep enough for text.
     inLight(
       `.divider{fill:rgba(0,0,0,.14)}.track{fill:rgba(0,0,0,.09)}` +
-        `.frame{fill:#FFFFFF;stroke:${NEUTRAL(0.6)}}` +
+        `.frame{fill:#FFFFFF;stroke:url(#edge);stroke-opacity:.9}` +
+        `.c-session,.s1{fill:#D9572F;stop-color:#D9572F}.c-week,.s2{fill:#6E4BD8;stop-color:#6E4BD8}.c-context,.s3{fill:#0B84B5;stop-color:#0B84B5}` +
         `.label{fill:#2E2E33}.value{fill:#141417}.dim{fill:#5F5F68}` +
         `.fill{fill:#5F5F68}.done,.pulse,.sweep{fill:#D9482B}.amber{fill:#C77800}.red{fill:#D12B2B}` +
         `.dot-warm{fill:#1E8E5A}.dot-cold{fill:#2F6FD6}` +
@@ -504,9 +508,14 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 
   const size = Math.ceil(width)
 
-  // One neutral border around everything: this is what makes the row read as one unit.
-  // Only a limit at 90% or more, about to stop work, tints it red; amber stays inside.
-  const edge: Level = worse(limits?.level ?? 0, context?.level ?? 0) === 2 ? 2 : 0
+  // One border around everything: this is what makes the row read as one unit.
+  // Calm, it runs through the sections' colours; a limit or the context at risk
+  // turns it amber, at 90% red, so the whole bar says so from its edge.
+  const edge: Level = worse(limits?.level ?? 0, context?.level ?? 0)
+
+  defs +=
+    `<linearGradient id="edge" gradientUnits="userSpaceOnUse" x1="${rowLeft}" x2="${size - rowRight}" y1="0" y2="0">` +
+    `<stop offset="0" class="s1"/><stop offset=".55" class="s2"/><stop offset="1" class="s3"/></linearGradient>`
 
   body =
     `<rect class="frame${EDGE[edge]}" x="${rowLeft + 0.5}" y="${above + 0.5}" width="${size - rowLeft - rowRight - 1}" height="${ROW - 1}" rx="${CORNER}"/>` +
@@ -554,16 +563,17 @@ export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cel
 }
 
 
-// ── The hover areas over the chips ──────────────────────────────────────────
-// The desktop band places a Box only in whole cells, and a Button has no width
-// of its own: a plain one is as wide as its label, and the app neither stretches
-// it nor lets it overflow (it shrinks it and draws an ellipsis). So each chip's
-// hover area is a Box of whole cells with a Button of no-break spaces centred in
-// it, sized to nine tenths of the area by the measured widths below. Where the
-// screen's font differs from the measure, the highlight is a little shorter or
-// longer, but evenly so at both ends, and never so long that it fills the area.
+// ── The buttons over the chips ──────────────────────────────────────────────
+// Only a Button is pressable in the band, and a desktop Button is the app's own
+// native button, as wide as its label: it has no width of its own. Put in a Box
+// narrower than its label, the app shrinks it and draws an ellipsis in it, so
+// the Box around each one is given no width at all: the Button always draws
+// whole. Its label of no-break spaces is sized to BUTTON_FILL of its chip by the
+// measured widths below, and it is placed, in whole cells, at the chip's middle.
+// Where a screen's font differs from the measure, its highlight is a little
+// shorter or longer than meant, and never cut.
 
-/** The least room kept between a hover area and the border or a divider, in the drawing's pixels. */
+/** The least room kept between a chip's area and the border or a divider, in the drawing's pixels. */
 export const HOVER_CLEAR = 2
 
 /**
@@ -572,15 +582,18 @@ export const HOVER_CLEAR = 2
  */
 export const BUTTON_BASE = 21
 export const SPACE_WIDTH = 3.64
-/** The share of its area a Button is sized to: the rest is slack for another screen's font. */
-export const BUTTON_FILL = 0.9
+/** The share of its chip's area a Button is sized to: the rest is slack for another screen's font. */
+export const BUTTON_FILL = 0.88
 
-/** The no-break spaces of a hover area's Button: as wide as BUTTON_FILL of its `cells`, at least one. */
+/** The no-break spaces of a chip's Button: as wide as BUTTON_FILL of its `cells`, at least one. */
 export const fitSpaces = (cells: number, cell: number) =>
   Math.max(1, Math.floor((cells * cell * BUTTON_FILL - BUTTON_BASE) / SPACE_WIDTH))
 
-/** One hover area over a chip: its left edge and its width in band cells. */
-export type ChipButton = { kind: ChipKind; left: number; cells: number }
+/**
+ * One chip's Button: the chip's area (`left` and `cells`, in band cells), and the
+ * Button in it, `spaces` long, placed at `at`, the cell that centres it.
+ */
+export type ChipButton = { kind: ChipKind; left: number; cells: number; spaces: number; at: number }
 
 /**
  * Where the hover areas go for the chips drawn, the drawing placed one cell left
@@ -595,6 +608,10 @@ export const chipButtons = (chips: readonly ChipExtent[], cell: number): ChipBut
     const first = Math.ceil((c.segStart + GAP + HOVER_CLEAR) / cell - 1e-6)
     const last = Math.floor((c.segEnd - HOVER_CLEAR) / cell + 1e-6)
     const left = Math.max(0, first - 1)
+    const cells = Math.max(1, last - 1 - left)
+    const spaces = fitSpaces(cells, cell)
+    // The room either side of the Button, by the measure, rounded to whole cells.
+    const slack = (cells * cell - (BUTTON_BASE + spaces * SPACE_WIDTH)) / 2
 
-    return { kind: c.kind, left, cells: Math.max(1, last - 1 - left) }
+    return { kind: c.kind, left, cells, spaces, at: left + Math.max(0, Math.round(slack / cell)) }
   })

@@ -106,7 +106,8 @@ test('the drawing takes the whole row, inside one border', async ($, on) => {
   expect(svg.props.source.includes('width="1343"')).toBe(true)
   // One plain neutral border, with no gradient.
   expect(svg.props.source.match(/class="frame"/g)?.length).toBe(1)
-  expect(svg.props.source.includes('url(#edge)')).toBe(false)
+  // Its border runs through the sections' colours.
+  expect(svg.props.source.includes('stroke:url(#edge)')).toBe(true)
   await ui.unmount()
 })
 
