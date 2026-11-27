@@ -173,6 +173,8 @@ declare module 'claude-code' {
       filesOpen: string[]
       /** Whose files the section lists: `all`, `you`, or an agent id. */
       filesFilter: string
+      /** Agents that edited files, by id, as their Agent call named them: for those no longer in the agents list. */
+      editorNames: Record<string, string>
       // ── 0.6.3 ──
       /** The main thread's requests this session, oldest first, for the Cache module's strip. */
       cacheLog: Cache[]

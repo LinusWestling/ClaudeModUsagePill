@@ -55,7 +55,9 @@ const PAIR_PAD = 10
 const MASCOT_SIZE = 32
 const MASCOT_ROOM = MASCOT_SIZE + 6
 const MIN_BAR = 56
-const MAX_BAR = 120
+/** How far the step bar grows into spare room, and the sweep's length when there are no steps. */
+const MAX_BAR = 160
+const SWEEP_BAR = 80
 /** The hairline between two groups. */
 const GAP = 1
 /** The thin bars of the limits and context chips, and the two limit bars' length. */
@@ -65,6 +67,12 @@ const LIMIT_BAR = 56
 const LIMIT_BAR_ALONE = 36
 const CONTEXT_BAR = 40
 const DOT = 7
+/**
+ * The narrowest a chip is drawn: its hover area, less half a cell each side, is
+ * then still wider than a one-space Button, which the app would otherwise shrink
+ * and fill with an ellipsis.
+ */
+const MIN_CHIP = 48
 const FONT = `-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif`
 
 /** How near a limit is: calm, a warning from 70%, an error from 90%. */
@@ -211,12 +219,23 @@ const contextContent = (c: Context) =>
 
 const cacheContent = (c: Cache) => DOT + (c.word ? 6 + widthOf(c.word) : 0)
 
+/**
+ * What the task chip shows while there is no task: the mascot and a word, no bar.
+ * The bar always leads with it, so the figures keep their place on the right and
+ * the mascot is there to press for the Subagents pane.
+ */
+export const IDLE_TASK: TaskView = { label: 'Ready', count: '' }
+
+const isIdle = (task: TaskView) => task === IDLE_TASK
+
 const taskChip = (task: TaskView, bar: number, hasLabel: boolean) =>
-  CHIP_PAD * 2 +
-  MASCOT_ROOM +
-  (hasLabel ? widthOf(task.label) + 10 : 0) +
-  bar +
-  (task.count ? 10 + widthOf(task.count, true) : 0)
+  isIdle(task)
+    ? CHIP_PAD * 2 + MASCOT_ROOM + (hasLabel ? widthOf(task.label) : 0)
+    : CHIP_PAD * 2 +
+      MASCOT_ROOM +
+      (hasLabel ? widthOf(task.label) + 10 : 0) +
+      bar +
+      (task.count ? 10 + widthOf(task.count, true) : 0)
 
 /** The chips as the bar draws them, each with the room its content needs. */
 const chipsOf = (m: PillModel, d: Detail, bar: number) => {
@@ -225,10 +244,10 @@ const chipsOf = (m: PillModel, d: Detail, bar: number) => {
   const cache = cacheOf(m, d)
   const chips: { kind: ChipKind; least: number }[] = []
 
-  if (m.task) chips.push({ kind: 'task', least: taskChip(m.task, bar, d.label) })
-  if (limits) chips.push({ kind: 'session', least: limitsContent(limits) + CHIP_PAD * 2 })
-  if (context) chips.push({ kind: 'context', least: contextContent(context) + PAIR_PAD * 2 })
-  if (cache) chips.push({ kind: 'cache', least: cacheContent(cache) + PAIR_PAD * 2 })
+  if (m.task) chips.push({ kind: 'task', least: Math.max(MIN_CHIP, taskChip(m.task, bar, d.label)) })
+  if (limits) chips.push({ kind: 'session', least: Math.max(MIN_CHIP, limitsContent(limits) + CHIP_PAD * 2) })
+  if (context) chips.push({ kind: 'context', least: Math.max(MIN_CHIP, contextContent(context) + PAIR_PAD * 2) })
+  if (cache) chips.push({ kind: 'cache', least: Math.max(MIN_CHIP, cacheContent(cache) + PAIR_PAD * 2) })
 
   return { chips, limits, context, cache }
 }
@@ -289,12 +308,13 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
     `<text x="${x.toFixed(1)}" y="${mid}" dy="0.35em" class="${cls}">${escapeXml(content)}</text>`
   const free = Math.max(0, width - rowLeft - neededWidth(m, d))
 
-  // The bar grows only so far when it has steps to show.
-  const bar = m.task?.steps ? Math.min(MAX_BAR, MIN_BAR + free) : MIN_BAR
+  // The bar grows only so far: a step bar into the spare room, a sweep to its own length.
+  const bar = !m.task || isIdle(m.task) ? MIN_BAR : Math.min(m.task.steps ? MAX_BAR : SWEEP_BAR, MIN_BAR + free)
   const { chips, limits, context, cache } = chipsOf(m, d, bar)
-  // The task leads and takes what is spare; with no task it is shared by the chips.
-  const rest = free - (m.task ? bar - MIN_BAR : 0)
-  const spare = (kind: ChipKind) => (chips.length === 0 ? 0 : m.task ? (kind === 'task' ? rest : 0) : rest / chips.length)
+  // The task leads and takes what is spare, so the figures sit packed at the right
+  // at their own width, and the space between reads as the task's.
+  const rest = free - (m.task && !isIdle(m.task) ? bar - MIN_BAR : 0)
+  const spare = (kind: ChipKind) => (kind === 'task' ? rest : 0)
 
   let body = ''
   let defs = ''
@@ -347,9 +367,11 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 
       body += `<g transform="translate(${mascotAt.toFixed(1)} ${mid - MASCOT_SIZE / 2 + fit.mascot.y}) scale(${MASCOT_SIZE / 16})" shape-rendering="crispEdges">${mascotMarkup(mood, m.mascot?.outfit)}</g>`
 
-      if (d.label) body += text(left, label, 'label')
+      if (d.label) body += text(left, label, isIdle(m.task) ? 'dim' : 'label')
 
-      if (steps) {
+      if (isIdle(m.task)) {
+        // No task: the mascot and its word alone.
+      } else if (steps) {
         // One segment per step: done ones lit, the current one pulsing.
         const split = steps.length > 24 ? 1 : 2
         const segment = (bar - split * (steps.length - 1)) / steps.length
@@ -378,7 +400,7 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
           `<g clip-path="url(#bar)"><rect class="sweep" x="${(start - sweep).toFixed(1)}" y="${barY}" width="${sweep}" height="6" rx="3" style="--travel:${(bar + sweep).toFixed(0)}px"/></g>`
       }
 
-      if (count) {
+      if (count && !isIdle(m.task)) {
         body += text(start + bar + 10, count, 'value')
       }
     }
@@ -520,37 +542,41 @@ const draw = (m: PillModel, d: Detail, width: number, fit: Fit, cell?: number, n
 }
 
 /** Fills `width`, giving up words before figures, and whole chips only as a last resort, when it is narrow. */
-export const buildPill = (m: PillModel, width: number, fit: Fit = MACOS, cell?: number, now = 0) => {
+export const buildPill = (given: PillModel, width: number, fit: Fit = MACOS, cell?: number, now = 0) => {
+  const m: PillModel = given.task ? given : { ...given, task: IDLE_TASK }
   const shown = (d: Detail): PillModel => ({
     ...m,
     cache: d.cache ? m.cache : undefined,
     context: d.context ? m.context : undefined,
   })
   const stage = STAGES.find(d => neededWidth(shown(d), d) <= width - fit.left) ?? STAGES[STAGES.length - 1]!
+  const drawn = draw(shown(stage), stage, width, fit, cell, now)
 
-  return draw(shown(stage), stage, width, fit, cell, now)
+  // The alt text says what there is: no task is no task, whatever the chip shows.
+  return m.task === IDLE_TASK ? { ...drawn, alt: drawn.alt.replace(/^Task: Ready(, )?/, '') } : drawn
 }
 
 
 // ── The hover areas over the chips ──────────────────────────────────────────
 // The desktop band places a Box only in whole cells, and a Button has no width
 // of its own: a plain one is as wide as its label, in a font whose width differs
-// from screen to screen. So the hover area is a Box measured in cells, which
-// clips what it holds: inside, a Button of more no-break spaces than could ever
-// fit, centred, so it overflows both ends and its native highlight is cut to the
-// Box exactly. Its width is then the cells' alone, whatever the font or the
-// display. With the dividers on cell middles (snapToCells), every area keeps the
+// from screen to screen. So the hover area is a Box measured in cells, laid out
+// as a column, which stretches the Button inside it across its whole width: the
+// native highlight is then the area exactly, whatever the font or the display.
+// The Button's label of no-break spaces is kept short enough never to fill the
+// area, as the app shrinks a Button too wide for its place and draws an ellipsis
+// in it. With the dividers on cell middles (snapToCells), every area keeps the
 // same half cell clear of them.
 
 /** The least room kept between a hover area and the border or a divider, in the drawing's pixels. */
 export const HOVER_CLEAR = 2
 
 /**
- * The no-break spaces a clipped Button needs to overflow a hover area of `cells`
- * at either end: a space is never narrower than a fifth of a cell (it is about
- * 0.4 of one), so this is always too many, and the clip keeps it so.
+ * The no-break spaces of a hover area's Button: well inside its `cells`. A
+ * desktop Button is about 21px of padding and 3.64px a space; this counts 28px
+ * and 4.2px, so a cell up to a tenth smaller than measured still leaves room.
  */
-export const overflowSpaces = (cells: number) => (cells + 2) * 5
+export const fitSpaces = (cells: number, cell: number) => Math.max(1, Math.floor((cells * cell - 28) / 4.2))
 
 /** One hover area over a chip: its left edge and its width in band cells. */
 export type ChipButton = { kind: ChipKind; left: number; cells: number }

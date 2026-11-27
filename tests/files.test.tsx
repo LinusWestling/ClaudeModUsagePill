@@ -3,12 +3,15 @@ import { expect, test } from 'claude-code/testing'
 import {
   MAX_DIFF_LINES,
   addEdit,
+  agentsInTranscript,
   capHunks,
+  changesInTranscript,
   changeOf,
   filtered,
   headerOf,
   hunksOf,
   hunksOfChange,
+  placeHunks,
   relativeTo,
   unified,
 } from '../hooks/filediff'
@@ -241,12 +244,12 @@ const edit = (file: string, from: string, to: string, extra: Record<string, unkn
 const texts = async (ui: any) =>
   [...(await ui.findAll({ type: 'Text' })), ...(await ui.findAll({ type: 'Button' }))].map((t: any) => t.text as string)
 
-test('the section is hidden until a file has been edited', async ($, on) => {
+test('until a file has been edited the section is its heading and one quiet line', async ($, on) => {
   standIn(on)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  expect(await ui.find({ type: 'Text', text: /Changed files/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /No files edited in this session yet/ })).not.toBe(undefined)
   expect(await ui.find({ key: 'files-collapse' })).toBe(undefined)
   await ui.unmount()
 })
@@ -317,7 +320,7 @@ test('a failed edit, or one the engine denied, is not counted and still fails as
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  expect(await ui.find({ type: 'Text', text: /Changed files/ })).toBe(undefined)
+  expect(await ui.find({ type: 'Text', text: /No files edited in this session yet/ })).not.toBe(undefined)
   await ui.unmount()
 })
 
@@ -386,3 +389,49 @@ for (const surface of ['desktop', 'terminal'] as const) {
     await ui.unmount()
   })
 }
+
+// ── Read back from a transcript ──
+
+const TRANSCRIPT = [
+  { role: 'user', content: 'fix it' },
+  {
+    role: 'assistant',
+    content: [
+      { type: 'tool_use', id: 't1', name: 'Edit', input: { file_path: '/repo/a.ts', old_string: 'one', new_string: 'two' } },
+      { type: 'tool_use', id: 't2', name: 'Write', input: { file_path: '/repo/new.md', content: 'hi\n' } },
+      { type: 'tool_use', id: 't3', name: 'Edit', input: { file_path: '/repo/b.ts', old_string: 'x', new_string: 'y' } },
+      { type: 'tool_use', id: 't4', name: 'Read', input: { file_path: '/repo/c.ts' } },
+      { type: 'tool_use', id: 't5', name: 'Agent', input: { description: 'Build the pill', prompt: '…' } },
+    ],
+  },
+  {
+    role: 'user',
+    content: [
+      { type: 'tool_result', tool_use_id: 't1', content: 'The file /repo/a.ts has been updated.' },
+      { type: 'tool_result', tool_use_id: 't2', content: [{ type: 'text', text: 'File created successfully at: /repo/new.md' }] },
+      { type: 'tool_result', tool_use_id: 't3', content: 'String not found', is_error: true },
+      { type: 'tool_result', tool_use_id: 't4', content: 'contents' },
+      { type: 'tool_result', tool_use_id: 't5', content: 'Async agent launched. agentId: a43603b5 (internal)' },
+    ],
+  },
+]
+
+test('a transcript gives back the file edits that went through, oldest first, and no reads', () => {
+  const found = changesInTranscript(TRANSCRIPT)
+
+  expect(found.map(f => f.change.path)).toEqual(['/repo/a.ts', '/repo/new.md'])
+  expect(found[1]!.result).toContain('created')
+})
+
+test('a transcript names the agents it started, by the id their result gives', () => {
+  expect(agentsInTranscript(TRANSCRIPT)).toEqual([{ id: 'a43603b5', name: 'Build the pill' }])
+})
+
+test('hunks read back are moved to where their new lines now stand in the file', () => {
+  const hunks = hunksOf('one', 'two', null)
+  const placed = placeHunks(hunks, 'a\nb\nc\ntwo\nd', 'two')
+
+  expect(placed[0]!.newStart).toBe(hunks[0]!.newStart + 3)
+  expect(placeHunks(hunks, 'nothing here', 'two')).toEqual(hunks)
+  expect(placeHunks(hunks, undefined, 'two')).toEqual(hunks)
+})

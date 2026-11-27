@@ -51,8 +51,8 @@ import {
   noteToolResult,
   startTurn,
 } from './headroom'
-import { MACOS, WINDOWS, buildPill, chipButtons, overflowSpaces } from './pill'
-import { filesSection, registerFiles } from './files'
+import { MACOS, WINDOWS, buildPill, chipButtons, fitSpaces } from './pill'
+import { filesSection, registerFiles, seedFiles } from './files'
 import { registerNotify } from './notify'
 import { registerReceipt } from './receipt'
 import { loadCoolingWarn, popoverPanel, registerPopover, togglePopover } from './popover'
@@ -244,8 +244,8 @@ const scrollToEnd = ($: EngineInterface) =>
 
 /**
  * A chip button's label is made of these, as it lies over a chip the pill draws
- * beneath it: no-break spaces, which no surface collapses. Always more than fit:
- * the hover area around it clips it to its cells (`chipButtons` in pill.ts).
+ * beneath it: no-break spaces, which no surface collapses. Fewer than fill its
+ * hover area, which stretches it to its cells (`chipButtons` in pill.ts).
  */
 const BLANK = '\u00a0'
 
@@ -840,6 +840,8 @@ export const register: Register = (on, options) => {
     await loadLimitSamples($, usage.rateLimits)
     // So is the choice of the cooling warning.
     await loadCoolingWarn($).catch(() => undefined)
+    // Edits made before the mod was watching, read back from the transcripts; in the background.
+    void seedFiles($)
 
     // Keeps the reset of the limits honest while nothing else redraws the pill.
     if (!isTicking) {
@@ -1247,8 +1249,8 @@ export const register: Register = (on, options) => {
             <Svg key="pill" source={pill.source} alt={pill.alt} />
           </Box>
           {/* One hover area over each chip the pill drew, whole cells wide (pill.ts
-              places them): a blank button, centred and too wide, clipped to the area,
-              so its native highlight is exactly the area. The task chip's keeps its old key. */}
+              places them): a column, so the blank button in it stretches across it and
+              its native highlight is exactly the area. The task chip's keeps its old key. */}
           {chipButtons(pill.chips, CELL_WIDTH).map(b => (
             <Box
               key={`hit-${b.kind}`}
@@ -1256,14 +1258,13 @@ export const register: Register = (on, options) => {
               top={0}
               left={b.left}
               width={b.cells}
-              overflow="hidden"
-              flexDirection="row"
-              justifyContent="center"
+              flexDirection="column"
+              alignItems="stretch"
             >
               <Button
                 key={b.kind === 'task' ? 'agents' : `chip-${b.kind}`}
                 plain
-                label={BLANK.repeat(overflowSpaces(b.cells))}
+                label={BLANK.repeat(fitSpaces(b.cells, CELL_WIDTH))}
                 onPress={() => pressChip($, b.kind)}
               />
             </Box>

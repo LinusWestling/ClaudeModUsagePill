@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { MACOS, HOVER_CLEAR, WINDOWS, buildPill, chipButtons, overflowSpaces } from '../hooks/pill'
+import { MACOS, HOVER_CLEAR, WINDOWS, buildPill, chipButtons, fitSpaces } from '../hooks/pill'
 import type { PillModel } from '../hooks/pill'
 import { NO_LEDGER } from '../hooks/receipt'
 
@@ -364,8 +364,9 @@ test('drawn for the band, every divider sits on a cell middle, and the hover are
         }
       })
 
-      // Every Button overflows its area at both ends, so the clip makes the highlight.
-      areas.forEach(b => expect(overflowSpaces(b.cells) * 0.2 * cell).toBeGreaterThan((b.cells + 1) * cell))
+      // No Button's label fills its area, even with a cell a tenth smaller than measured:
+      // the app would shrink it and draw an ellipsis. The area stretches it instead.
+      areas.forEach(b => expect(21 + 3.64 * fitSpaces(b.cells, cell)).toBeLessThan(b.cells * cell * 0.9))
     }
   }
 })
@@ -387,12 +388,15 @@ test('on the desktop every chip has its own blank button', async ($, on) => {
   await ui.unmount()
 })
 
-test('without a task there is no task button, and the gauges keep theirs', async ($, on) => {
+test('without a task the mascot still leads, idle, and the gauges keep their buttons', async ($, on) => {
   seed(on, { reading: READING, cache: CACHE })
 
   const ui = await $.ui.mount({ ...BAND, props: { ...BAND.props, isWorking: false }, surface: 'desktop' })
+  const svg: any = await ui.find({ type: 'Svg' })
 
-  expect(await ui.find({ key: 'agents' })).toBe(undefined)
+  expect((await ui.find({ key: 'agents' }) as any)?.type).toBe('Button')
+  expect(svg.props.source).toContain('>Ready<')
+  expect(svg.props.alt.startsWith('Task')).toBe(false)
   expect((await ui.find({ key: 'chip-session' }) as any)?.type).toBe('Button')
   await ui.unmount()
 })
